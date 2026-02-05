@@ -4,7 +4,7 @@
   "version": "0.1.0",
   "license": "MIT",
   "scripts": {
-    "dev": "node src/main.ts",
+    "run": "node src/main.ts",
     "lint": "pnpm tsc && pnpm eslint",
     "tsc": "tsc -p tsconfig.prod.json",
     "eslint": "CI=true eslint src/ --color --max-warnings=0",
