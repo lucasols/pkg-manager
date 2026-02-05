@@ -28,13 +28,6 @@ const pkgManagerConfigSchema = z.object({
   requireMajorConfirmation: z.boolean().optional(),
 })
 
-export type PrePublishScript = {
-  /** The shell command to execute */
-  command: string
-  /** Display label shown during execution */
-  label: string
-}
-
 export type MonorepoPackage = {
   /** Package name (as in package.json) */
   name: string
@@ -42,6 +35,13 @@ export type MonorepoPackage = {
   path: string
   /** Package names this package depends on (for topological ordering) */
   dependsOn?: string[]
+}
+
+export type PrePublishScript = {
+  /** The shell command to execute */
+  command: string
+  /** Display label shown during execution */
+  label: string
 }
 
 /**
