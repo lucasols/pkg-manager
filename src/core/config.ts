@@ -30,6 +30,29 @@ export type PrePublishScript = z.infer<typeof prePublishScriptSchema>;
 export type MonorepoPackage = z.infer<typeof monorepoPackageSchema>;
 export type PkgManagerConfig = z.infer<typeof pkgManagerConfigSchema>;
 
+/**
+ * Defines the configuration for pkg-manager.
+ *
+ * @param config - The configuration object
+ * @param config.prePublish - Scripts to run before publishing (e.g., build commands)
+ * @param config.prePublish[].command - The shell command to execute
+ * @param config.prePublish[].label - Display label shown during execution
+ * @param config.monorepo - Monorepo configuration for multi-package projects
+ * @param config.monorepo.packages - Array of packages in the monorepo
+ * @param config.monorepo.packages[].name - Package name (as in package.json)
+ * @param config.monorepo.packages[].path - Relative path to the package directory
+ * @param config.monorepo.packages[].dependsOn - Package names this package depends on (for topological ordering)
+ * @param config.hashStorePath - Custom path for storing publish hashes (default: `node_modules/.pkg-manager/hashes.json`)
+ * @param config.requireMajorConfirmation - Require confirmation for major version bumps (default: `true`)
+ *
+ * @example
+ * ```ts
+ * export default defineConfig({
+ *   requireMajorConfirmation: true,
+ *   prePublish: [{ command: 'pnpm build', label: 'Building' }],
+ * });
+ * ```
+ */
 export function defineConfig(config: PkgManagerConfig): PkgManagerConfig {
   return config;
 }
