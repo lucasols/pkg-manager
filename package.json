@@ -41,6 +41,7 @@
   "devDependencies": {
     "@ls-stack/eslint-cfg": "^0.5.1",
     "@types/node": "^24.7.1",
+    "eslint": "^9.39.2",
     "tsdown": "^0.20.2",
     "tsx": "^4.19.4",
     "typescript": "5.9.3"
