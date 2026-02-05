@@ -1,0 +1,47 @@
+{
+  "name": "@ls-stack/pkg-manager",
+  "description": "CLI tool for managing package publishing with hash-based change tracking and monorepo support",
+  "version": "0.1.0",
+  "license": "MIT",
+  "scripts": {
+    "dev": "tsx src/main.ts",
+    "lint": "pnpm tsc && pnpm eslint",
+    "tsc": "tsc -p tsconfig.prod.json",
+    "eslint": "CI=true eslint src/ --color --max-warnings=0",
+    "build": "pnpm lint && tsdown"
+  },
+  "files": [
+    "dist"
+  ],
+  "repository": "github:lucasols/pkg-manager",
+  "author": "Lucas Santos",
+  "type": "module",
+  "bin": {
+    "pkg-manager": "./dist/main.mjs"
+  },
+  "module": "./dist/exports.mjs",
+  "types": "./dist/exports.d.mts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/exports.d.mts",
+        "default": "./dist/exports.mjs"
+      }
+    }
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=25.0.0"
+  },
+  "dependencies": {
+    "@ls-stack/cli": "^0.1.0",
+    "zod": "^4.3.6"
+  },
+  "devDependencies": {
+    "@ls-stack/eslint-cfg": "^0.5.1",
+    "@types/node": "^24.7.1",
+    "tsdown": "^0.20.2",
+    "tsx": "^4.19.4",
+    "typescript": "5.9.3"
+  }
+}
