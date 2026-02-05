@@ -26,9 +26,44 @@ const pkgManagerConfigSchema = z.object({
   requireMajorConfirmation: z.boolean().optional(),
 });
 
-export type PrePublishScript = z.infer<typeof prePublishScriptSchema>;
-export type MonorepoPackage = z.infer<typeof monorepoPackageSchema>;
-export type PkgManagerConfig = z.infer<typeof pkgManagerConfigSchema>;
+export type PrePublishScript = {
+  /** The shell command to execute */
+  command: string;
+  /** Display label shown during execution */
+  label: string;
+};
+
+export type MonorepoPackage = {
+  /** Package name (as in package.json) */
+  name: string;
+  /** Relative path to the package directory */
+  path: string;
+  /** Package names this package depends on (for topological ordering) */
+  dependsOn?: string[];
+};
+
+/**
+ * Configuration for pkg-manager.
+ */
+export type PkgManagerConfig = {
+  /** Scripts to run before publishing (e.g., build commands) */
+  prePublish?: PrePublishScript[];
+  /** Monorepo configuration for multi-package projects */
+  monorepo?: {
+    /** Array of packages in the monorepo */
+    packages: MonorepoPackage[];
+  };
+  /**
+   * Custom path for storing publish hashes.
+   * @default "node_modules/.pkg-manager/hashes.json"
+   */
+  hashStorePath?: string;
+  /**
+   * Require confirmation for major version bumps.
+   * @default true
+   */
+  requireMajorConfirmation?: boolean;
+};
 
 /**
  * Defines the configuration for pkg-manager.
