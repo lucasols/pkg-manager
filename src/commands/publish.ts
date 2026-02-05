@@ -53,13 +53,15 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   const packagePath = getPackagePath(targetPackage, config, cwd);
   const packageName = getPackageName(packagePath);
 
-  console.log(styleText(['blue', 'bold'], `\nPublishing: ${packageName}`));
+  const currentVersion = getPackageVersion(packagePath);
+
+  console.log(styleText(['blue', 'bold'], `\nPublishing: ${packageName} (current: ${currentVersion})`));
 
   if (args.dryRun) {
     console.log(styleText(['yellow'], '(dry-run mode - no changes will be made)\n'));
   }
 
-  const versionType = await resolveVersionType(args.type);
+  const versionType = await resolveVersionType(args.type, currentVersion);
 
   if (versionType === 'major' && config.requireMajorConfirmation && !args.skipConfirm) {
     const confirmed = await cliInput.confirm(
@@ -202,7 +204,26 @@ async function resolveTargetPackage(
   return packageName;
 }
 
-async function resolveVersionType(typeArg: string | undefined): Promise<VersionType> {
+function bumpVersion(version: string, type: VersionType): string {
+  const parts = version.split('.').map(Number);
+  const major = parts[0] ?? 0;
+  const minor = parts[1] ?? 0;
+  const patch = parts[2] ?? 0;
+
+  switch (type) {
+    case 'major':
+      return `${major + 1}.0.0`;
+    case 'minor':
+      return `${major}.${minor + 1}.0`;
+    case 'patch':
+      return `${major}.${minor}.${patch + 1}`;
+  }
+}
+
+async function resolveVersionType(
+  typeArg: string | undefined,
+  currentVersion: string,
+): Promise<VersionType> {
   if (typeArg) {
     const normalizedType = typeArg.toLowerCase();
     const matchingType = VERSION_TYPES.find((t) => t === normalizedType);
@@ -219,9 +240,9 @@ async function resolveVersionType(typeArg: string | undefined): Promise<VersionT
 
   const versionType = await cliInput.select('Select version bump type:', {
     options: [
-      { value: 'patch', label: 'patch', hint: 'Bug fixes (0.0.x)' },
-      { value: 'minor', label: 'minor', hint: 'New features (0.x.0)' },
-      { value: 'major', label: 'major', hint: 'Breaking changes (x.0.0)' },
+      { value: 'patch', label: 'patch', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'patch')}` },
+      { value: 'minor', label: 'minor', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'minor')}` },
+      { value: 'major', label: 'major', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'major')}` },
     ],
   });
 
