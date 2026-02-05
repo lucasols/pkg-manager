@@ -61,7 +61,7 @@ pkg-manager publish [package] [--type <major|minor|patch>] [--force] [--dry-run]
 2. Prompts for version type if not provided
 3. Confirms major version bumps (configurable)
 4. Builds dependencies first (monorepo, topological order)
-5. Runs pre-publish scripts
+5. Runs pre-publish scripts (required - see [Pre-Publish Scripts](#pre-publish-scripts))
 6. Generates SHA256 hash of `dist/` directory
 7. Checks hash against stored hashes (prevents duplicate publishes)
 8. Bumps version with `pnpm version`
@@ -96,7 +96,7 @@ export default defineConfig({
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `prePublish` | `array` | `[]` | Scripts to run before publishing |
+| `prePublish` | `array` | Uses `pre-publish` script | Scripts to run before publishing |
 | `prePublish[].command` | `string` | Required | Command to execute |
 | `prePublish[].label` | `string` | Required | Display label for the script |
 | `monorepo` | `object` | - | Monorepo configuration |
@@ -106,6 +106,27 @@ export default defineConfig({
 | `monorepo.packages[].dependsOn` | `string[]` | `[]` | Package names this depends on |
 | `hashStorePath` | `string` | `node_modules/.pkg-manager/hashes.json` | Where to store publish hashes |
 | `requireMajorConfirmation` | `boolean` | `true` | Require confirmation for major versions |
+
+## Pre-Publish Scripts
+
+Pre-publish scripts are **required**. They ensure your package is built and validated before publishing.
+
+**Resolution order:**
+1. If `prePublish` is configured in `pkg-manager.config.ts`, those scripts are used
+2. Otherwise, looks for a `pre-publish` script in `package.json`
+3. If neither exists, the publish command exits with an error
+
+**Simplest setup** - add a `pre-publish` script to your `package.json`:
+
+```json
+{
+  "scripts": {
+    "pre-publish": "pnpm lint && pnpm build"
+  }
+}
+```
+
+This works without any config file.
 
 ## Hash-Based Change Detection
 

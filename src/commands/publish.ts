@@ -3,7 +3,12 @@ import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { styleText } from 'node:util';
 import { z } from 'zod';
-import { getHashStorePath, loadConfig, type PkgManagerConfig } from '../core/config.ts';
+import {
+  getHashStorePath,
+  loadConfig,
+  type PkgManagerConfig,
+  type PrePublishScript,
+} from '../core/config.ts';
 import { commitIfDirty, isGitClean } from '../core/git.ts';
 import {
   checkHashForDuplicate,
@@ -19,6 +24,7 @@ type VersionType = (typeof VERSION_TYPES)[number];
 const packageJsonSchema = z.object({
   name: z.string().optional(),
   version: z.string().optional(),
+  scripts: z.record(z.string(), z.string()).optional(),
 });
 
 type PublishArgs = {
@@ -74,27 +80,27 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     }
   }
 
-  if (config.prePublish && config.prePublish.length > 0) {
-    console.log(styleText(['dim'], '\nRunning pre-publish scripts...'));
+  const prePublishScripts = getPrePublishScripts(config, packagePath, packageName);
 
-    for (const script of config.prePublish) {
-      console.log(styleText(['blue'], `\n${script.label}...`));
+  console.log(styleText(['dim'], '\nRunning pre-publish scripts...'));
 
-      if (!args.dryRun) {
-        const [cmd, ...cmdArgs] = script.command.split(' ');
+  for (const script of prePublishScripts) {
+    console.log(styleText(['blue'], `\n${script.label}...`));
 
-        if (!cmd) {
-          console.error(styleText(['red'], `Invalid command: ${script.command}`));
-          process.exit(1);
-        }
+    if (!args.dryRun) {
+      const [cmd, ...cmdArgs] = script.command.split(' ');
 
-        if (config.monorepo) {
-          await runCmdOrExit(script.label, ['pnpm', '--filter', packageName, ...cmdArgs], {
-            cwd,
-          });
-        } else {
-          await runCmdOrExit(script.label, [cmd, ...cmdArgs], { cwd: packagePath });
-        }
+      if (!cmd) {
+        console.error(styleText(['red'], `Invalid command: ${script.command}`));
+        process.exit(1);
+      }
+
+      if (config.monorepo) {
+        await runCmdOrExit(script.label, ['pnpm', '--filter', packageName, ...cmdArgs], {
+          cwd,
+        });
+      } else {
+        await runCmdOrExit(script.label, [cmd, ...cmdArgs], { cwd: packagePath });
       }
     }
   }
@@ -268,4 +274,32 @@ function getPackageName(packagePath: string): string {
 function getPackageVersion(packagePath: string): string {
   const packageJson = readPackageJson(packagePath);
   return packageJson.version ?? '0.0.0';
+}
+
+function getPrePublishScripts(
+  config: PkgManagerConfig,
+  packagePath: string,
+  packageName: string,
+): PrePublishScript[] {
+  if (config.prePublish && config.prePublish.length > 0) {
+    return config.prePublish;
+  }
+
+  const packageJson = readPackageJson(packagePath);
+  const hasPrePublishScript = packageJson.scripts?.['pre-publish'] !== undefined;
+
+  if (hasPrePublishScript) {
+    return [{ command: 'pnpm pre-publish', label: 'Running pre-publish script' }];
+  }
+
+  console.error(
+    styleText(
+      ['red', 'bold'],
+      `\nNo pre-publish scripts configured for ${packageName}`,
+    ),
+  );
+  console.error(
+    'Either add a "pre-publish" script to package.json or configure "prePublish" in pkg-manager.config.ts',
+  );
+  process.exit(1);
 }
