@@ -11,7 +11,6 @@ await createCLI(
   },
   {
     init: createCmd({
-      short: 'i',
       description: 'Initialize pkg-manager configuration',
       args: {
         force: {
