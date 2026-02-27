@@ -1,4 +1,5 @@
 import { cliInput } from '@ls-stack/cli';
+import clipboardy from 'clipboardy';
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { styleText } from 'node:util';
@@ -178,9 +179,14 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     await commitIfDirty(`chore: update publish hashes for ${packageName}@${newVersion}`);
   }
 
+  const installCmd = `pnpm add ${packageName}@${newVersion}`;
+
+  await clipboardy.write(installCmd);
+
   console.log(
     styleText(['green', 'bold'], `\nSuccessfully published ${packageName}@${newVersion}`),
   );
+  console.log(styleText(['dim'], `\nCopied to clipboard: ${installCmd}`));
 }
 
 async function resolveTargetPackage(
