@@ -24,7 +24,6 @@ export async function runCmd(
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       cwd: options.cwd,
-      shell: true,
       stdio: options.silent ? 'pipe' : 'inherit',
     });
 
