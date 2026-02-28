@@ -9,8 +9,8 @@ importers:
   .:
     dependencies:
       '@ls-stack/cli':
-        specifier: ^0.5.0
-        version: 0.5.0(@types/node@24.10.10)
+        specifier: ^0.6.0
+        version: 0.6.0(@types/node@24.10.10)
       clipboardy:
         specifier: ^5.3.1
         version: 5.3.1
@@ -438,8 +438,8 @@ packages:
   '@jridgewell/trace-mapping@0.3.31':
     resolution: {integrity: sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw==}
 
-  '@ls-stack/cli@0.5.0':
-    resolution: {integrity: sha512-N/RGlUb56nd7L8qDXkoPdnd8kpeMWctvYriccxSRS769NUijoUmyRziCDzViCbxs7tuzD9vqt7T5vrOB7Hn4Fg==}
+  '@ls-stack/cli@0.6.0':
+    resolution: {integrity: sha512-BEg4TebbU2XaurhkBS5YIAQPsSi8t3u884hYSmrgw0Gvb1SJ6LNkHxQIquJoE0cadTVhqNPNXTgQpwFSDy/lcg==}
     engines: {node: '>=21.5.0'}
 
   '@ls-stack/eslint-cfg@0.5.1':
@@ -1870,7 +1870,7 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
-  '@ls-stack/cli@0.5.0(@types/node@24.10.10)':
+  '@ls-stack/cli@0.6.0(@types/node@24.10.10)':
     dependencies:
       '@inquirer/prompts': 7.10.1(@types/node@24.10.10)
       nanospinner: 1.2.2
