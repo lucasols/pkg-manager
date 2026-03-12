@@ -19,6 +19,7 @@ const monorepoPackageSchema = z.object({
 
 const pkgManagerConfigSchema = z.object({
   prePublish: z.array(prePublishScriptSchema).optional(),
+  postPublish: z.array(prePublishScriptSchema).optional(),
   monorepo: z
     .object({
       packages: z.array(monorepoPackageSchema),
@@ -50,6 +51,8 @@ export type PrePublishScript = {
 export type PkgManagerConfig = {
   /** Scripts to run before publishing (e.g., build commands) */
   prePublish?: PrePublishScript[]
+  /** Scripts to run after publishing (e.g., deploy, notifications) */
+  postPublish?: PrePublishScript[]
   /** Monorepo configuration for multi-package projects */
   monorepo?: {
     /** Array of packages in the monorepo */
@@ -135,6 +138,16 @@ export function generateConfigFile(
   if (config.prePublish && config.prePublish.length > 0) {
     lines.push('  prePublish: [')
     for (const script of config.prePublish) {
+      lines.push(
+        `    { command: '${script.command}', label: '${script.label}' },`
+      )
+    }
+    lines.push('  ],')
+  }
+
+  if (config.postPublish && config.postPublish.length > 0) {
+    lines.push('  postPublish: [')
+    for (const script of config.postPublish) {
       lines.push(
         `    { command: '${script.command}', label: '${script.label}' },`
       )

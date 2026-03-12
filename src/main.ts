@@ -37,7 +37,7 @@ await createCLI(
         type: {
           type: 'value-string-flag',
           name: 'type',
-          description: 'Version bump type: major, minor, or patch',
+          description: 'Version bump type (e.g., patch, minor, major, prerelease, release, prepatch-alpha)',
         },
         force: {
           type: 'flag',

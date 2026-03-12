@@ -18,10 +18,24 @@ import {
   savePackageHash,
 } from '../core/hash.ts';
 import { buildDependencies } from '../core/monorepo.ts';
+import {
+  bumpVersionPreview,
+  getNextTags,
+  getPrereleaseTag,
+  isPrerelease,
+  PRERELEASE_TAGS,
+  type PrereleaseTag,
+} from '../core/semver.ts';
 import { runCmdOrExit } from '../utils/runCmd.ts';
 
-const VERSION_TYPES = ['major', 'minor', 'patch'] as const;
-type VersionType = (typeof VERSION_TYPES)[number];
+const PRE_TYPE_REGEX = /^(prepatch|preminor|premajor)-(\w+)$/;
+
+type VersionBumpSpec = {
+  label: string;
+  versionArgs: string[];
+  isMajor: boolean;
+  distTag: string | undefined;
+};
 
 const packageJsonSchema = z.object({
   name: z.string().optional(),
@@ -63,9 +77,9 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     console.log(styleText(['yellow'], '(dry-run mode - no changes will be made)\n'));
   }
 
-  const versionType = await resolveVersionType(args.type, currentVersion);
+  const versionBump = await resolveVersionBump(args.type, currentVersion);
 
-  if (versionType === 'major' && config.requireMajorConfirmation && !args.skipConfirm) {
+  if (versionBump.isMajor && config.requireMajorConfirmation && !args.skipConfirm) {
     const confirmed = await cliInput.confirm(
       'You are about to publish a MAJOR version. Are you sure?',
       { initial: false },
@@ -147,14 +161,14 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     console.warn('Force flag enabled - proceeding with publish anyway.');
   }
 
-  console.log(styleText(['blue'], `\nBumping version (${versionType})...`));
+  console.log(styleText(['blue'], `\nBumping version (${versionBump.label})...`));
 
   if (!args.dryRun) {
-    await runCmdOrExit('bump version', ['pnpm', 'version', versionType], {
+    await runCmdOrExit('bump version', ['pnpm', 'version', ...versionBump.versionArgs], {
       cwd: packagePath,
     });
 
-    await commitIfDirty(`chore: bump ${packageName} to next ${versionType} version`);
+    await commitIfDirty(`chore: bump ${packageName} version (${versionBump.label})`);
   }
 
   const newVersion = getPackageVersion(packagePath);
@@ -171,7 +185,13 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   console.log(styleText(['blue'], '\nPublishing to npm...'));
 
   if (!args.dryRun) {
-    await runCmdOrExit('publish', ['pnpm', 'publish', '--access', 'public'], {
+    const publishArgs = ['pnpm', 'publish', '--access', 'public'];
+
+    if (versionBump.distTag) {
+      publishArgs.push('--tag', versionBump.distTag);
+    }
+
+    await runCmdOrExit('publish', publishArgs, {
       cwd: packagePath,
     });
 
@@ -183,6 +203,33 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   console.log(
     styleText(['green', 'bold'], `\nSuccessfully published ${packageName}@${newVersion}`),
   );
+
+  const postPublishScripts = config.postPublish ?? [];
+
+  if (postPublishScripts.length > 0) {
+    console.log(styleText(['dim'], '\nRunning post-publish scripts...'));
+
+    for (const script of postPublishScripts) {
+      console.log(styleText(['blue'], `\n${script.label}...`));
+
+      if (!args.dryRun) {
+        const [cmd, ...cmdArgs] = script.command.split(' ');
+
+        if (!cmd) {
+          console.error(styleText(['red'], `Invalid command: ${script.command}`));
+          process.exit(1);
+        }
+
+        if (config.monorepo) {
+          await runCmdOrExit(script.label, ['pnpm', '--filter', packageName, ...cmdArgs], {
+            cwd,
+          });
+        } else {
+          await runCmdOrExit(script.label, [cmd, ...cmdArgs], { cwd: packagePath });
+        }
+      }
+    }
+  }
 
   const copyCmdPrefix = env.PKG_MANAGER_COPY_CMD;
 
@@ -216,49 +263,241 @@ async function resolveTargetPackage(
   return packageName;
 }
 
-function bumpVersion(version: string, type: VersionType): string {
-  const parts = version.split('.').map(Number);
-  const major = parts[0] ?? 0;
-  const minor = parts[1] ?? 0;
-  const patch = parts[2] ?? 0;
+const STABLE_TYPES = ['major', 'minor', 'patch'] as const;
+type StableType = (typeof STABLE_TYPES)[number];
 
-  switch (type) {
-    case 'major':
-      return `${major + 1}.0.0`;
-    case 'minor':
-      return `${major}.${minor + 1}.0`;
-    case 'patch':
-      return `${major}.${minor}.${patch + 1}`;
-  }
-}
+const VALID_TYPE_ARGS = [
+  ...STABLE_TYPES,
+  'prerelease',
+  'release',
+  ...PRERELEASE_TAGS.flatMap((tag) =>
+    (['prepatch', 'preminor', 'premajor'] as const).map((base) => `${base}-${tag}`),
+  ),
+] as const;
 
-async function resolveVersionType(
-  typeArg: string | undefined,
+function parseTypeArg(
+  typeArg: string,
   currentVersion: string,
-): Promise<VersionType> {
-  if (typeArg) {
-    const normalizedType = typeArg.toLowerCase();
-    const matchingType = VERSION_TYPES.find((t) => t === normalizedType);
+): VersionBumpSpec {
+  const normalized = typeArg.toLowerCase();
 
-    if (!matchingType) {
-      console.error(
-        styleText(['red', 'bold'], `Invalid version type: ${typeArg}`),
-      );
-      console.error(`Valid types: ${VERSION_TYPES.join(', ')}`);
+  const stableMatch = STABLE_TYPES.find((t) => t === normalized);
+  if (stableMatch) {
+    return {
+      label: stableMatch,
+      versionArgs: [stableMatch],
+      isMajor: stableMatch === 'major',
+      distTag: undefined,
+    };
+  }
+
+  if (normalized === 'prerelease') {
+    const currentTag = getPrereleaseTag(currentVersion);
+    if (!currentTag) {
+      console.error(styleText(['red', 'bold'], 'Cannot use --type=prerelease on a stable version.'));
+      console.error('Use prepatch-alpha, preminor-alpha, or premajor-alpha instead.');
       process.exit(1);
     }
-    return matchingType;
+    return {
+      label: 'prerelease',
+      versionArgs: ['prerelease'],
+      isMajor: false,
+      distTag: currentTag,
+    };
   }
 
-  const versionType = await cliInput.select('Select version bump type:', {
-    options: [
-      { value: 'patch', label: 'patch', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'patch')}` },
-      { value: 'minor', label: 'minor', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'minor')}` },
-      { value: 'major', label: 'major', hint: `${currentVersion} → ${bumpVersion(currentVersion, 'major')}` },
-    ],
+  if (normalized === 'release') {
+    if (!isPrerelease(currentVersion)) {
+      console.error(styleText(['red', 'bold'], 'Cannot use --type=release on a stable version.'));
+      process.exit(1);
+    }
+    return {
+      label: 'release',
+      versionArgs: ['patch'],
+      isMajor: false,
+      distTag: undefined,
+    };
+  }
+
+  const preMatch = PRE_TYPE_REGEX.exec(normalized);
+  if (preMatch) {
+    const baseType = preMatch[1];
+    const preid = preMatch[2];
+
+    if (baseType && preid) {
+      return {
+        label: `${baseType} (${preid})`,
+        versionArgs: [baseType, `--preid=${preid}`],
+        isMajor: false,
+        distTag: preid,
+      };
+    }
+  }
+
+  console.error(styleText(['red', 'bold'], `Invalid version type: ${typeArg}`));
+  console.error(`Valid types: ${VALID_TYPE_ARGS.join(', ')}`);
+  process.exit(1);
+}
+
+async function resolveVersionBump(
+  typeArg: string | undefined,
+  currentVersion: string,
+): Promise<VersionBumpSpec> {
+  if (typeArg) {
+    return parseTypeArg(typeArg, currentVersion);
+  }
+
+  const currentPreTag = getPrereleaseTag(currentVersion);
+
+  if (currentPreTag) {
+    return resolveVersionBumpFromPrerelease(currentVersion, currentPreTag);
+  }
+
+  return resolveVersionBumpFromStable(currentVersion);
+}
+
+async function resolveVersionBumpFromStable(
+  currentVersion: string,
+): Promise<VersionBumpSpec> {
+  type StableOption = StableType | 'prerelease-menu';
+
+  const options: Array<{ value: StableOption; label: string; hint?: string }> = [
+    { value: 'patch', label: 'patch', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'patch')}` },
+    { value: 'minor', label: 'minor', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'minor')}` },
+    { value: 'major', label: 'major', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'major')}` },
+    { value: 'prerelease-menu', label: 'prerelease...' },
+  ];
+
+  const selection = await cliInput.select('Select version bump type:', { options });
+
+  if (selection === 'prerelease-menu') {
+    return resolvePrerelaseSubmenu(currentVersion);
+  }
+
+  return {
+    label: selection,
+    versionArgs: [selection],
+    isMajor: selection === 'major',
+    distTag: undefined,
+  };
+}
+
+async function resolvePrerelaseSubmenu(
+  currentVersion: string,
+): Promise<VersionBumpSpec> {
+  const baseTypes = ['prepatch', 'preminor', 'premajor'] as const;
+
+  const options: Array<{ value: string; label: string; hint: string }> = [];
+
+  for (const tag of PRERELEASE_TAGS) {
+    for (const base of baseTypes) {
+      const preview = bumpVersionPreview(currentVersion, base, tag);
+      options.push({
+        value: `${base}-${tag}`,
+        label: `${base} (${tag})`,
+        hint: `${currentVersion} → ${preview}`,
+      });
+    }
+  }
+
+  const selection = await cliInput.select('Select prerelease type:', { options });
+
+  const [baseType, preid] = selection.split('-');
+
+  if (!baseType || !preid) {
+    console.error(styleText(['red', 'bold'], 'Unexpected selection format.'));
+    process.exit(1);
+  }
+
+  return {
+    label: `${baseType} (${preid})`,
+    versionArgs: [baseType, `--preid=${preid}`],
+    isMajor: false,
+    distTag: preid,
+  };
+}
+
+type PrereleaseOption = 'prerelease' | 'release' | StableType | 'prerelease-menu' | `graduate-${PrereleaseTag}`;
+
+async function resolveVersionBumpFromPrerelease(
+  currentVersion: string,
+  currentTag: string,
+): Promise<VersionBumpSpec> {
+  const options: Array<{ value: PrereleaseOption; label: string; hint: string }> = [];
+
+  options.push({
+    value: 'prerelease',
+    label: 'prerelease',
+    hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'prerelease')}`,
   });
 
-  return versionType;
+  const nextTags = getNextTags(currentTag);
+  for (const tag of nextTags) {
+    options.push({
+      value: `graduate-${tag}`,
+      label: `graduate to ${tag}`,
+      hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'prerelease', tag)}`,
+    });
+  }
+
+  options.push({
+    value: 'release',
+    label: 'release',
+    hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'release')}`,
+  });
+
+  options.push(
+    { value: 'patch', label: 'patch', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'patch')}` },
+    { value: 'minor', label: 'minor', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'minor')}` },
+    { value: 'major', label: 'major', hint: `${currentVersion} → ${bumpVersionPreview(currentVersion, 'major')}` },
+  );
+
+  options.push({
+    value: 'prerelease-menu',
+    label: 'prerelease...',
+    hint: 'start a new prerelease cycle',
+  });
+
+  const selection = await cliInput.select('Select version bump type:', { options });
+
+  if (selection === 'prerelease-menu') {
+    return resolvePrerelaseSubmenu(currentVersion);
+  }
+
+  if (selection === 'prerelease') {
+    return {
+      label: 'prerelease',
+      versionArgs: ['prerelease'],
+      isMajor: false,
+      distTag: currentTag,
+    };
+  }
+
+  if (selection === 'release') {
+    return {
+      label: 'release',
+      versionArgs: ['patch'],
+      isMajor: false,
+      distTag: undefined,
+    };
+  }
+
+  if (selection.startsWith('graduate-')) {
+    const targetTag = selection.replace('graduate-', '');
+    return {
+      label: `graduate to ${targetTag}`,
+      versionArgs: ['prerelease', `--preid=${targetTag}`],
+      isMajor: false,
+      distTag: targetTag,
+    };
+  }
+
+  return {
+    label: selection,
+    versionArgs: [selection],
+    isMajor: selection === 'major',
+    distTag: undefined,
+  };
 }
 
 function getPackagePath(

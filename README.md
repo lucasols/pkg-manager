@@ -46,7 +46,7 @@ pkg-manager init [--force]
 Publishes a package with hash-based change detection.
 
 ```bash
-pkg-manager publish [package] [--type <major|minor|patch>] [--force] [--dry-run] [--skip-confirm]
+pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-confirm]
 ```
 
 **Arguments:**
@@ -55,7 +55,7 @@ pkg-manager publish [package] [--type <major|minor|patch>] [--force] [--dry-run]
 
 **Options:**
 
-- `--type <type>` - Version bump type: `major`, `minor`, or `patch`
+- `--type <type>` - Version bump type: `patch`, `minor`, `major`, `prerelease`, `release`, `prepatch-alpha`, `preminor-beta`, `premajor-rc`, etc.
 - `--force` - Publish even if no changes detected
 - `--dry-run` - Preview what would happen without making changes
 - `--skip-confirm` - Skip major version confirmation prompt
@@ -63,7 +63,7 @@ pkg-manager publish [package] [--type <major|minor|patch>] [--force] [--dry-run]
 **Workflow:**
 
 1. Verifies git working directory is clean
-2. Prompts for version type if not provided
+2. Prompts for version type if not provided (supports prerelease via two-level select)
 3. Confirms major version bumps (configurable)
 4. Builds dependencies first (monorepo, topological order)
 5. Runs pre-publish scripts (required - see [Pre-Publish Scripts](#pre-publish-scripts))
@@ -71,8 +71,9 @@ pkg-manager publish [package] [--type <major|minor|patch>] [--force] [--dry-run]
 7. Checks hash against stored hashes (prevents duplicate publishes)
 8. Bumps version with `pnpm version`
 9. Creates git tag (`packageName@version`)
-10. Publishes with `pnpm publish --access public`
+10. Publishes with `pnpm publish --access public` (uses `--tag <preid>` for prereleases)
 11. Saves hash for future duplicate detection
+12. Runs post-publish scripts (if configured)
 
 ## Configuration
 
@@ -108,6 +109,9 @@ export default defineConfig({
 | `prePublish`                    | `array`    | Uses `pre-publish` script               | Scripts to run before publishing        |
 | `prePublish[].command`          | `string`   | Required                                | Command to execute                      |
 | `prePublish[].label`            | `string`   | Required                                | Display label for the script            |
+| `postPublish`                   | `array`    | -                                       | Scripts to run after publishing         |
+| `postPublish[].command`         | `string`   | Required                                | Command to execute                      |
+| `postPublish[].label`           | `string`   | Required                                | Display label for the script            |
 | `monorepo`                      | `object`   | -                                       | Monorepo configuration                  |
 | `monorepo.packages`             | `array`    | Required                                | List of packages                        |
 | `monorepo.packages[].name`      | `string`   | Required                                | Package name (from package.json)        |
@@ -137,6 +141,45 @@ Pre-publish scripts are **required**. They ensure your package is built and vali
 ```
 
 This works without any config file.
+
+## Post-Publish Scripts
+
+Post-publish scripts are **optional**. They run after a successful publish, hash save, and git commit. Useful for deploy steps, notifications, or cleanup.
+
+```typescript
+export default defineConfig({
+  postPublish: [
+    { command: 'pnpm deploy', label: 'Deploying' },
+    { command: 'node notify.ts', label: 'Sending notification' },
+  ],
+})
+```
+
+## Prerelease Versions
+
+pkg-manager supports publishing prerelease versions (alpha, beta, rc).
+
+**Interactive mode** uses a two-level select:
+
+- For **stable versions** (e.g., `1.2.3`): the first select shows `patch`, `minor`, `major`, and `prerelease...`. Choosing `prerelease...` opens a second select with all combinations of `prepatch`/`preminor`/`premajor` × `alpha`/`beta`/`rc`.
+- For **prerelease versions** (e.g., `1.2.4-alpha.0`): relevant options are promoted to the top-level select — `prerelease` (bump number), `graduate to beta`/`rc`, and `release` (drop the prerelease suffix).
+
+**CLI mode:**
+
+```bash
+# Start a prerelease cycle
+pkg-manager publish --type prepatch-alpha    # 1.2.3 → 1.2.4-alpha.0
+pkg-manager publish --type preminor-beta     # 1.2.3 → 1.3.0-beta.0
+pkg-manager publish --type premajor-rc       # 1.2.3 → 2.0.0-rc.0
+
+# Bump existing prerelease
+pkg-manager publish --type prerelease        # 1.2.4-alpha.0 → 1.2.4-alpha.1
+
+# Release from prerelease
+pkg-manager publish --type release           # 1.2.4-alpha.1 → 1.2.4
+```
+
+Prerelease versions are published with `--tag <preid>` (e.g., `--tag alpha`) so they don't become the `latest` dist-tag on npm.
 
 ## Hash-Based Change Detection
 
@@ -182,6 +225,15 @@ pkg-manager publish --force --type patch
 
 # Publish major version without confirmation
 pkg-manager publish --type major --skip-confirm
+
+# Start a prerelease cycle
+pkg-manager publish --type prepatch-alpha
+
+# Bump an existing prerelease
+pkg-manager publish --type prerelease
+
+# Release from a prerelease version
+pkg-manager publish --type release
 ```
 
 ## License
