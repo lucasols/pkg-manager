@@ -26,7 +26,7 @@ import {
   PRERELEASE_TAGS,
   type PrereleaseTag,
 } from '../core/semver.ts';
-import { runCmdOrExit } from '../utils/runCmd.ts';
+import { runCmd, runCmdOrExit } from '../utils/runCmd.ts';
 
 const PRE_TYPE_REGEX = /^(prepatch|preminor|premajor)-(\w+)$/;
 
@@ -40,6 +40,9 @@ type VersionBumpSpec = {
 const packageJsonSchema = z.object({
   name: z.string().optional(),
   version: z.string().optional(),
+  publishConfig: z.object({
+    registry: z.string().optional(),
+  }).optional(),
   scripts: z.record(z.string(), z.string()).optional(),
 });
 
@@ -161,14 +164,57 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     console.warn('Force flag enabled - proceeding with publish anyway.');
   }
 
+  const registry = getPublishRegistry(packagePath);
+
+  if (args.dryRun) {
+    const registryText = registry ? ` against ${registry}` : '';
+    console.log(styleText(['dim'], `\nWould verify npm login${registryText}.`));
+  } else {
+    await ensureNpmLoggedIn(packagePath, registry);
+  }
+
+  const preBumpHead = !args.dryRun ? await getCurrentHead() : undefined;
+  const existingTags = !args.dryRun ? await getGitTags() : new Set<string>();
+  const createdTags: string[] = [];
+
   console.log(styleText(['blue'], `\nBumping version (${versionBump.label})...`));
 
   if (!args.dryRun) {
-    await runCmdOrExit('bump version', ['pnpm', 'version', ...versionBump.versionArgs], {
+    const bumpResult = await runCmd('bump version', ['pnpm', 'version', ...versionBump.versionArgs], {
       cwd: packagePath,
     });
 
-    await commitIfDirty(`chore: bump ${packageName} version (${versionBump.label})`);
+    if (!bumpResult.ok) {
+      console.error(styleText(['red', 'bold'], 'Failed: bump version'));
+      console.error(bumpResult.error);
+      await rollbackVersionChanges(
+        'Version bump failed after making changes.',
+        requireRollbackHead(preBumpHead),
+        packageName,
+        getPackageVersion(packagePath),
+        createdTags,
+        existingTags,
+      );
+      process.exit(1);
+    }
+
+    const commitResult = await commitIfDirtyForPublish(
+      `chore: bump ${packageName} version (${versionBump.label})`,
+    );
+
+    if (!commitResult.ok) {
+      console.error(styleText(['red', 'bold'], 'Failed: commit version bump'));
+      console.error(commitResult.error);
+      await rollbackVersionChanges(
+        'Version commit failed after making changes.',
+        requireRollbackHead(preBumpHead),
+        packageName,
+        getPackageVersion(packagePath),
+        createdTags,
+        existingTags,
+      );
+      process.exit(1);
+    }
   }
 
   const newVersion = getPackageVersion(packagePath);
@@ -178,7 +224,23 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   if (!args.dryRun) {
     const tagName = `${packageName}@${newVersion}`;
-    await runCmdOrExit('create tag', ['git', 'tag', tagName]);
+    const tagResult = await runCmd('create tag', ['git', 'tag', tagName]);
+
+    if (!tagResult.ok) {
+      console.error(styleText(['red', 'bold'], 'Failed: create tag'));
+      console.error(tagResult.error);
+      await rollbackVersionChanges(
+        'Tag creation failed after the version bump.',
+        requireRollbackHead(preBumpHead),
+        packageName,
+        newVersion,
+        createdTags,
+        existingTags,
+      );
+      process.exit(1);
+    }
+
+    createdTags.push(tagName);
     console.log(styleText(['dim'], `Created tag: ${tagName}`));
   }
 
@@ -191,9 +253,29 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
       publishArgs.push('--tag', versionBump.distTag);
     }
 
-    await runCmdOrExit('publish', publishArgs, {
+    const publishResult = await runCmd('publish', publishArgs, {
       cwd: packagePath,
     });
+
+    if (!publishResult.ok) {
+      console.error(styleText(['red', 'bold'], 'Failed: publish'));
+      console.error(publishResult.error);
+
+      if (!preBumpHead) {
+        console.error('Could not roll back: original git HEAD was not captured.');
+        process.exit(1);
+      }
+
+      await rollbackVersionChanges(
+        'Publish failed after the version bump.',
+        preBumpHead,
+        packageName,
+        newVersion,
+        createdTags,
+        existingTags,
+      );
+      process.exit(1);
+    }
 
     savePackageHash(hashStorePath, packageName, newVersion, currentHash);
 
@@ -546,6 +628,188 @@ function getPackageName(packagePath: string): string {
 function getPackageVersion(packagePath: string): string {
   const packageJson = readPackageJson(packagePath);
   return packageJson.version ?? '0.0.0';
+}
+
+function getPublishRegistry(packagePath: string): string | undefined {
+  const packageJson = readPackageJson(packagePath);
+  return packageJson.publishConfig?.registry;
+}
+
+async function ensureNpmLoggedIn(
+  packagePath: string,
+  registry: string | undefined,
+): Promise<void> {
+  const registryText = registry ? ` (${registry})` : '';
+
+  console.log(styleText(['dim'], `\nChecking npm login${registryText}...`));
+
+  const whoami = await checkNpmLogin(packagePath, registry);
+
+  if (whoami.ok) {
+    console.log(styleText(['dim'], `Logged in to npm as ${whoami.username}.`));
+    return;
+  }
+
+  console.warn(styleText(['yellow'], 'You are not logged in to npm.'));
+
+  const shouldLogin = await cliInput.confirm(
+    'Run npm login now?',
+    { initial: true },
+  );
+
+  if (!shouldLogin) {
+    console.error(styleText(['red', 'bold'], 'Cannot publish without npm login.'));
+    process.exit(1);
+  }
+
+  const loginResult = await runCmd(
+    'npm login',
+    withRegistry(['pnpm', 'npm', 'login'], registry),
+    { cwd: packagePath },
+  );
+
+  if (!loginResult.ok) {
+    console.error(styleText(['red', 'bold'], 'Failed: npm login'));
+    console.error(loginResult.error);
+    process.exit(1);
+  }
+
+  const recheck = await checkNpmLogin(packagePath, registry);
+
+  if (!recheck.ok) {
+    console.error(styleText(['red', 'bold'], 'npm login could not be verified.'));
+    console.error(recheck.error);
+    process.exit(1);
+  }
+
+  console.log(styleText(['dim'], `Logged in to npm as ${recheck.username}.`));
+}
+
+async function checkNpmLogin(
+  packagePath: string,
+  registry: string | undefined,
+): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
+  const result = await runCmd(
+    'npm whoami',
+    withRegistry(['pnpm', 'npm', 'whoami'], registry),
+    { cwd: packagePath, silent: true },
+  );
+
+  if (!result.ok) {
+    return { ok: false, error: result.error };
+  }
+
+  return { ok: true, username: result.output.trim() };
+}
+
+function withRegistry(cmd: string[], registry: string | undefined): string[] {
+  if (!registry) return cmd;
+  return [...cmd, '--registry', registry];
+}
+
+async function getCurrentHead(): Promise<string> {
+  const result = await runCmd('read git HEAD', ['git', 'rev-parse', 'HEAD'], {
+    silent: true,
+  });
+
+  if (!result.ok) {
+    console.error(styleText(['red', 'bold'], 'Failed: read git HEAD'));
+    console.error(result.error);
+    process.exit(1);
+  }
+
+  return result.output.trim();
+}
+
+async function getGitTags(): Promise<Set<string>> {
+  const result = await runCmd('read git tags', ['git', 'tag', '--list'], {
+    silent: true,
+  });
+
+  if (!result.ok) {
+    console.error(styleText(['red', 'bold'], 'Failed: read git tags'));
+    console.error(result.error);
+    process.exit(1);
+  }
+
+  return new Set(result.output.split('\n').filter(Boolean));
+}
+
+function requireRollbackHead(preBumpHead: string | undefined): string {
+  if (!preBumpHead) {
+    console.error('Could not roll back: original git HEAD was not captured.');
+    process.exit(1);
+  }
+
+  return preBumpHead;
+}
+
+async function commitIfDirtyForPublish(
+  message: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const clean = await isGitClean();
+
+  if (clean) {
+    console.log('No changes to commit');
+    return { ok: true };
+  }
+
+  const addResult = await runCmd('stage changes', ['git', 'add', '.']);
+
+  if (!addResult.ok) return { ok: false, error: addResult.error };
+
+  const commitResult = await runCmd('commit', ['git', 'commit', '-m', message]);
+
+  if (!commitResult.ok) return { ok: false, error: commitResult.error };
+
+  return { ok: true };
+}
+
+async function rollbackVersionChanges(
+  reason: string,
+  preBumpHead: string,
+  packageName: string,
+  version: string,
+  createdTags: string[],
+  existingTags: Set<string>,
+): Promise<void> {
+  console.log(styleText(['yellow'], `\n${reason} Rolling back version changes...`));
+
+  const tagsToDelete = [...new Set([...createdTags, `v${version}`])];
+  const failedCommands: string[] = [];
+
+  for (const tag of tagsToDelete) {
+    if (existingTags.has(tag)) continue;
+
+    const result = await runCmd('delete tag', ['git', 'tag', '-d', tag], {
+      silent: true,
+    });
+
+    if (!result.ok && !result.error.includes('not found')) {
+      failedCommands.push(`git tag -d ${tag}`);
+      console.error(styleText(['red'], `Failed to delete tag ${tag}: ${result.error}`));
+    }
+  }
+
+  const resetResult = await runCmd('reset version commit', ['git', 'reset', '--hard', preBumpHead], {
+    silent: true,
+  });
+
+  if (!resetResult.ok) {
+    failedCommands.push(`git reset --hard ${preBumpHead}`);
+    console.error(styleText(['red'], `Failed to reset version commit: ${resetResult.error}`));
+  }
+
+  if (failedCommands.length > 0) {
+    console.error(styleText(['red', 'bold'], 'Automatic rollback was incomplete.'));
+    console.error('Run these cleanup commands manually:');
+    for (const command of failedCommands) {
+      console.error(`  ${command}`);
+    }
+    return;
+  }
+
+  console.log(styleText(['green'], `Rolled back ${packageName}@${version}.`));
 }
 
 function getPrePublishScripts(

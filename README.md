@@ -69,11 +69,12 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 5. Runs pre-publish scripts (required - see [Pre-Publish Scripts](#pre-publish-scripts))
 6. Generates SHA256 hash of `dist/` directory
 7. Checks hash against stored hashes (prevents duplicate publishes)
-8. Bumps version with `pnpm version`
-9. Creates git tag (`packageName@version`)
-10. Publishes with `pnpm publish --access public` (uses `--tag <preid>` for prereleases)
-11. Saves hash for future duplicate detection
-12. Runs post-publish scripts (if configured)
+8. Verifies npm login and offers to run `pnpm npm login` if needed
+9. Bumps version with `pnpm version`
+10. Creates git tag (`packageName@version`)
+11. Publishes with `pnpm publish --access public` (uses `--tag <preid>` for prereleases)
+12. Saves hash for future duplicate detection
+13. Runs post-publish scripts (if configured)
 
 ## Configuration
 
