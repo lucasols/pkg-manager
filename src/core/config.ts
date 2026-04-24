@@ -27,6 +27,7 @@ const pkgManagerConfigSchema = z.object({
     .optional(),
   hashStorePath: z.string().optional(),
   requireMajorConfirmation: z.boolean().optional(),
+  gitPush: z.boolean().optional(),
 })
 
 export type MonorepoPackage = {
@@ -68,6 +69,11 @@ export type PkgManagerConfig = {
    * @default true
    */
   requireMajorConfirmation?: boolean
+  /**
+   * Push the version commit and tag after publishing.
+   * @default true
+   */
+  gitPush?: boolean
 }
 
 /**
@@ -96,6 +102,7 @@ export function configExists(cwd: string = process.cwd()): boolean {
 const defaultConfig: PkgManagerConfig = {
   hashStorePath: DEFAULT_HASH_STORE_PATH,
   requireMajorConfirmation: true,
+  gitPush: true,
 }
 
 export async function loadConfig(
@@ -114,6 +121,7 @@ export async function loadConfig(
     ...config,
     hashStorePath: config.hashStorePath ?? DEFAULT_HASH_STORE_PATH,
     requireMajorConfirmation: config.requireMajorConfirmation ?? true,
+    gitPush: config.gitPush ?? true,
   }
 }
 
@@ -133,6 +141,10 @@ export function generateConfigFile(
     lines.push(
       `  requireMajorConfirmation: ${config.requireMajorConfirmation},`
     )
+  }
+
+  if (config.gitPush !== undefined) {
+    lines.push(`  gitPush: ${config.gitPush},`)
   }
 
   if (config.prePublish && config.prePublish.length > 0) {

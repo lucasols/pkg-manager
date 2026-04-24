@@ -54,20 +54,27 @@ await createCLI(
           name: 'skip-confirm',
           description: 'Skip major version confirmation prompt',
         },
+        noPush: {
+          type: 'flag',
+          name: 'no-push',
+          description: 'Skip pushing the version commit and tag',
+        },
       },
       examples: [
         { args: ['--type', 'patch'], description: 'Publish a patch version' },
         { args: ['@my-scope/pkg', '--type', 'minor'], description: 'Publish specific package' },
         { args: ['--dry-run'], description: 'Preview publish without changes' },
         { args: ['--force', '--type', 'patch'], description: 'Force publish even if unchanged' },
+        { args: ['--type', 'patch', '--no-push'], description: 'Publish without pushing git refs' },
       ],
-      run: async ({ package: pkg, type, force, dryRun, skipConfirm }) => {
+      run: async ({ package: pkg, type, force, dryRun, skipConfirm, noPush }) => {
         await publishCommand({
           package: pkg || undefined,
           type,
           force,
           dryRun,
           skipConfirm,
+          noPush,
         });
       },
     }),

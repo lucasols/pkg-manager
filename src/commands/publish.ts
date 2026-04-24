@@ -52,6 +52,7 @@ type PublishArgs = {
   force: boolean;
   dryRun: boolean;
   skipConfirm: boolean;
+  noPush: boolean;
 };
 
 export async function publishCommand(args: PublishArgs): Promise<void> {
@@ -176,6 +177,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   const preBumpHead = !args.dryRun ? await getCurrentHead() : undefined;
   const existingTags = !args.dryRun ? await getGitTags() : new Set<string>();
   const createdTags: string[] = [];
+  const shouldPushGitRefs = config.gitPush !== false && !args.noPush;
 
   console.log(styleText(['blue'], `\nBumping version (${versionBump.label})...`));
 
@@ -222,8 +224,9 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   console.log(styleText(['blue'], '\nCreating git tag...'));
 
+  const tagName = `${packageName}@${newVersion}`;
+
   if (!args.dryRun) {
-    const tagName = `${packageName}@${newVersion}`;
     const tagResult = await runCmd('create tag', ['git', 'tag', tagName]);
 
     if (!tagResult.ok) {
@@ -280,6 +283,28 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     savePackageHash(hashStorePath, packageName, newVersion, currentHash);
 
     await commitIfDirty(`chore: update publish hashes for ${packageName}@${newVersion}`);
+  }
+
+  if (args.dryRun) {
+    const pushText = shouldPushGitRefs
+      ? 'Would push git commits and tag.'
+      : 'Would skip git push.';
+    console.log(styleText(['dim'], `\n${pushText}`));
+  } else if (shouldPushGitRefs) {
+    console.log(styleText(['blue'], '\nPushing git commits and tag...'));
+
+    const pushResult = await pushVersionCommitAndTag(tagName);
+
+    if (!pushResult.ok) {
+      console.error(styleText(['red', 'bold'], 'Failed: push git refs'));
+      console.error(pushResult.error);
+      console.error(
+        'The package was published, but the git push failed. Push the commit and tag manually after fixing the remote issue.',
+      );
+      process.exit(1);
+    }
+  } else {
+    console.log(styleText(['dim'], '\nSkipping git push.'));
   }
 
   console.log(
@@ -763,6 +788,63 @@ async function commitIfDirtyForPublish(
   if (!commitResult.ok) return { ok: false, error: commitResult.error };
 
   return { ok: true };
+}
+
+async function pushVersionCommitAndTag(
+  tagName: string,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  const pushTarget = await getGitPushTarget();
+
+  if (!pushTarget.ok) return pushTarget;
+
+  return runCmd('push version commit and tag', [
+    'git',
+    'push',
+    '--atomic',
+    pushTarget.remote,
+    `HEAD:refs/heads/${pushTarget.branch}`,
+    `refs/tags/${tagName}:refs/tags/${tagName}`,
+  ]);
+}
+
+async function getGitPushTarget(): Promise<
+  { ok: true; remote: string; branch: string } | { ok: false; error: string }
+> {
+  const upstreamResult = await runCmd(
+    'read git upstream',
+    ['git', 'rev-parse', '--abbrev-ref', '--symbolic-full-name', '@{u}'],
+    { silent: true },
+  );
+
+  if (upstreamResult.ok) {
+    const upstream = upstreamResult.output.trim();
+    const slashIndex = upstream.indexOf('/');
+
+    if (slashIndex > 0 && slashIndex < upstream.length - 1) {
+      return {
+        ok: true,
+        remote: upstream.slice(0, slashIndex),
+        branch: upstream.slice(slashIndex + 1),
+      };
+    }
+  }
+
+  const branchResult = await runCmd('read current branch', ['git', 'branch', '--show-current'], {
+    silent: true,
+  });
+
+  if (!branchResult.ok) return { ok: false, error: branchResult.error };
+
+  const branch = branchResult.output.trim();
+
+  if (!branch) {
+    return {
+      ok: false,
+      error: 'Could not determine the current git branch to push.',
+    };
+  }
+
+  return { ok: true, remote: 'origin', branch };
 }
 
 async function rollbackVersionChanges(

@@ -46,7 +46,7 @@ pkg-manager init [--force]
 Publishes a package with hash-based change detection.
 
 ```bash
-pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-confirm]
+pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-confirm] [--no-push]
 ```
 
 **Arguments:**
@@ -59,6 +59,7 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 - `--force` - Publish even if no changes detected
 - `--dry-run` - Preview what would happen without making changes
 - `--skip-confirm` - Skip major version confirmation prompt
+- `--no-push` - Skip pushing the version commit and git tag
 
 **Workflow:**
 
@@ -74,7 +75,8 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 10. Creates git tag (`packageName@version`)
 11. Publishes with `pnpm publish --access public` (uses `--tag <preid>` for prereleases)
 12. Saves hash for future duplicate detection
-13. Runs post-publish scripts (if configured)
+13. Pushes git commits and tag
+14. Runs post-publish scripts (if configured)
 
 ## Configuration
 
@@ -120,6 +122,7 @@ export default defineConfig({
 | `monorepo.packages[].dependsOn` | `string[]` | `[]`                                    | Package names this depends on           |
 | `hashStorePath`                 | `string`   | `node_modules/.pkg-manager/hashes.json` | Where to store publish hashes           |
 | `requireMajorConfirmation`      | `boolean`  | `true`                                  | Require confirmation for major versions |
+| `gitPush`                       | `boolean`  | `true`                                  | Push git commits and tag after publish  |
 
 ## Pre-Publish Scripts
 
@@ -145,7 +148,7 @@ This works without any config file.
 
 ## Post-Publish Scripts
 
-Post-publish scripts are **optional**. They run after a successful publish, hash save, and git commit. Useful for deploy steps, notifications, or cleanup.
+Post-publish scripts are **optional**. They run after a successful publish, hash save, git commit, and push. Useful for deploy steps, notifications, or cleanup.
 
 ```typescript
 export default defineConfig({
