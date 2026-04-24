@@ -9,7 +9,8 @@
     "tsc": "tsc -p tsconfig.prod.json",
     "eslint": "CI=true eslint src/ --color --max-warnings=0",
     "build": "pnpm lint && tsdown",
-    "pre-publish": "pnpm build"
+    "pre-publish": "pnpm build",
+    "update-global-package": "bun i @ls-stack/pkg-manager@latest -g --no-cache"
   },
   "files": [
     "dist"
