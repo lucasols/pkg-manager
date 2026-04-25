@@ -258,6 +258,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
     const publishResult = await runCmd('publish', publishArgs, {
       cwd: packagePath,
+      autoRespondToNpmAuthPrompt: true,
     });
 
     if (!publishResult.ok) {
@@ -690,7 +691,7 @@ async function ensureNpmLoggedIn(
   const loginResult = await runCmd(
     'npm login',
     withRegistry(['pnpm', 'npm', 'login'], registry),
-    { cwd: packagePath },
+    { cwd: packagePath, autoRespondToNpmAuthPrompt: true },
   );
 
   if (!loginResult.ok) {
