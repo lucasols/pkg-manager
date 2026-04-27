@@ -256,10 +256,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
       publishArgs.push('--tag', versionBump.distTag);
     }
 
-    const publishResult = await runCmd('publish', publishArgs, {
-      cwd: packagePath,
-      autoRespondToNpmAuthPrompt: true,
-    });
+    const publishResult = await runCmd('publish', publishArgs, { cwd: packagePath });
 
     if (!publishResult.ok) {
       console.error(styleText(['red', 'bold'], 'Failed: publish'));
