@@ -4,7 +4,6 @@ import { styleText } from 'node:util';
 
 const NPM_BROWSER_AUTH_PROMPT_REGEX = /Press\s+ENTER\s+to\s+open\s+in\s+(?:the\s+)?browser\.\.\./i;
 const NPM_AUTH_URL_TITLE_REGEX = /(?:Login|Authenticate your account|Create your account|Browser unavailable\. Please open the URL manually) at:/i;
-const SCRIPT_EOF_MARKER_REGEX = /\^D\b\b/g;
 const URL_REGEX = /https?:\/\/[^\s)]+/i;
 
 export type RunCmdOptions = {
@@ -73,13 +72,7 @@ function runCmdWithNpmAuthPromptResponse(
   args: string[],
   options: RunCmdOptions,
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
-  const scriptArgs = getScriptArgs(command, args);
-
-  if (!scriptArgs) {
-    return runCmdAndOpenAuthUrl(command, args, options);
-  }
-
-  return runCmdAndOpenAuthUrl('script', scriptArgs, options);
+  return runCmdAndOpenAuthUrl(command, args, options);
 }
 
 function runCmdAndOpenAuthUrl(
@@ -104,7 +97,7 @@ function runCmdAndOpenAuthUrl(
       stream: NodeJS.WriteStream,
       append: (text: string) => void,
     ) {
-      const text = data.toString().replaceAll(SCRIPT_EOF_MARKER_REGEX, '');
+      const text = data.toString();
       append(text);
       stream.write(text);
 
@@ -190,26 +183,6 @@ function openUrl(url: string): void {
       stdio: 'ignore',
     }).unref();
   }
-}
-
-function getScriptArgs(command: string, args: string[]): string[] | undefined {
-  if (!process.stdin.isTTY || !process.stdout.isTTY) {
-    return undefined;
-  }
-
-  if (platform === 'darwin') {
-    return ['-q', '/dev/null', command, ...args];
-  }
-
-  if (platform === 'linux') {
-    return ['-qfec', [command, ...args].map(shellQuote).join(' '), '/dev/null'];
-  }
-
-  return undefined;
-}
-
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 export async function runCmdOrExit(
