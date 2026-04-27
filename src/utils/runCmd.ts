@@ -3,7 +3,9 @@ import { platform } from 'node:process';
 import { styleText } from 'node:util';
 
 const NPM_BROWSER_AUTH_PROMPT_REGEX = /Press\s+ENTER\s+to\s+open\s+in\s+(?:the\s+)?browser\.\.\./i;
+const NPM_AUTH_URL_TITLE_REGEX = /(?:Login|Authenticate your account|Create your account|Browser unavailable\. Please open the URL manually) at:/i;
 const SCRIPT_EOF_MARKER_REGEX = /\^D\b\b/g;
+const URL_REGEX = /https?:\/\/[^\s)]+/i;
 
 export type RunCmdOptions = {
   cwd?: string;
@@ -74,27 +76,28 @@ function runCmdWithNpmAuthPromptResponse(
   const scriptArgs = getScriptArgs(command, args);
 
   if (!scriptArgs) {
-    return runCmdWithPipe(command, args, options);
+    return runCmdAndOpenAuthUrl(command, args, options, 'pipe');
   }
 
-  return runCmdWithPipe('script', scriptArgs, options);
+  return runCmdAndOpenAuthUrl('script', scriptArgs, options, 'interactive');
 }
 
-function runCmdWithPipe(
+function runCmdAndOpenAuthUrl(
   command: string,
   args: string[],
   options: RunCmdOptions,
+  mode: 'interactive' | 'pipe',
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       cwd: options.cwd,
-      stdio: 'pipe',
+      stdio: mode === 'interactive' ? ['inherit', 'pipe', 'pipe'] : 'pipe',
     });
 
     let output = '';
     let error = '';
     let promptBuffer = '';
-    let respondedToAuthPrompt = false;
+    let openedAuthUrl = false;
 
     function handleOutput(
       data: Buffer,
@@ -107,37 +110,42 @@ function runCmdWithPipe(
 
       promptBuffer = `${promptBuffer}${text}`.slice(-2000);
 
-      if (
-        !respondedToAuthPrompt
-        && NPM_BROWSER_AUTH_PROMPT_REGEX.test(promptBuffer)
-      ) {
-        respondedToAuthPrompt = true;
-        proc.stdin.write('\n');
+      if (!openedAuthUrl && shouldOpenNpmAuthUrl(promptBuffer)) {
+        const authUrl = promptBuffer.match(URL_REGEX)?.[0];
+
+        if (authUrl) {
+          openedAuthUrl = true;
+          openUrl(authUrl);
+        }
       }
     }
 
     function forwardInput(data: Buffer) {
-      if (proc.stdin.writable) {
+      if (proc.stdin?.writable) {
         proc.stdin.write(data);
       }
     }
 
-    process.stdin.on('data', forwardInput);
+    if (mode === 'pipe') {
+      process.stdin.on('data', forwardInput);
+    }
 
-    proc.stdout.on('data', (data: Buffer) => {
+    proc.stdout?.on('data', (data: Buffer) => {
       handleOutput(data, process.stdout, (text) => {
         output += text;
       });
     });
 
-    proc.stderr.on('data', (data: Buffer) => {
+    proc.stderr?.on('data', (data: Buffer) => {
       handleOutput(data, process.stderr, (text) => {
         error += text;
       });
     });
 
     proc.on('close', (code) => {
-      process.stdin.off('data', forwardInput);
+      if (mode === 'pipe') {
+        process.stdin.off('data', forwardInput);
+      }
 
       if (code === 0) {
         resolve({ ok: true, output });
@@ -150,10 +158,38 @@ function runCmdWithPipe(
     });
 
     proc.on('error', (spawnError) => {
-      process.stdin.off('data', forwardInput);
+      if (mode === 'pipe') {
+        process.stdin.off('data', forwardInput);
+      }
       resolve({ ok: false, error: spawnError.message });
     });
   });
+}
+
+function shouldOpenNpmAuthUrl(output: string): boolean {
+  return URL_REGEX.test(output) && (
+    NPM_BROWSER_AUTH_PROMPT_REGEX.test(output)
+    || NPM_AUTH_URL_TITLE_REGEX.test(output)
+  );
+}
+
+function openUrl(url: string): void {
+  if (platform === 'darwin') {
+    spawn('open', [url], { detached: true, stdio: 'ignore' }).unref();
+    return;
+  }
+
+  if (platform === 'linux') {
+    spawn('xdg-open', [url], { detached: true, stdio: 'ignore' }).unref();
+    return;
+  }
+
+  if (platform === 'win32') {
+    spawn('cmd', ['/c', 'start', '', url], {
+      detached: true,
+      stdio: 'ignore',
+    }).unref();
+  }
 }
 
 function getScriptArgs(command: string, args: string[]): string[] | undefined {
