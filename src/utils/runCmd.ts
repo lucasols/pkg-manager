@@ -1,4 +1,4 @@
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import { platform } from 'node:process';
 import { styleText } from 'node:util';
 
@@ -72,7 +72,42 @@ function runCmdWithNpmAuthPromptResponse(
   args: string[],
   options: RunCmdOptions,
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
+  if (canUseExpectPty()) {
+    return runCmdWithExpectNpmAuthPromptResponse(command, args, options);
+  }
+
   return runCmdAndOpenAuthUrl(command, args, options);
+}
+
+function runCmdWithExpectNpmAuthPromptResponse(
+  command: string,
+  args: string[],
+  options: RunCmdOptions,
+): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
+  const commandLine = [command, ...args].map(shellQuote).join(' ');
+
+  return new Promise((resolve) => {
+    const proc = spawn('expect', ['-c', EXPECT_NPM_AUTH_PROMPT_SCRIPT], {
+      cwd: options.cwd,
+      env: { ...process.env, PKG_MANAGER_EXPECT_COMMAND: commandLine },
+      stdio: 'inherit',
+    });
+
+    proc.on('close', (code) => {
+      if (code === 0) {
+        resolve({ ok: true, output: '' });
+      } else {
+        resolve({
+          ok: false,
+          error: `Command failed with exit code ${code}`,
+        });
+      }
+    });
+
+    proc.on('error', (error) => {
+      resolve({ ok: false, error: error.message });
+    });
+  });
 }
 
 function runCmdAndOpenAuthUrl(
@@ -184,6 +219,30 @@ function openUrl(url: string): void {
     }).unref();
   }
 }
+
+function canUseExpectPty(): boolean {
+  if (platform === 'win32') return false;
+  if (!process.stdin.isTTY || !process.stdout.isTTY) return false;
+
+  return spawnSync('expect', ['-v'], { stdio: 'ignore' }).status === 0;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+const EXPECT_NPM_AUTH_PROMPT_SCRIPT = `
+set timeout -1
+spawn -noecho sh -c $env(PKG_MANAGER_EXPECT_COMMAND)
+interact -o -re {Press[[:space:]]+ENTER[[:space:]]+to[[:space:]]+open[[:space:]]+in[[:space:]]+(the[[:space:]]+)?browser[^\\r\\n]*} {
+  send "\\r"
+}
+catch wait result
+if {[llength $result] >= 4} {
+  exit [lindex $result 3]
+}
+exit 1
+`;
 
 export async function runCmdOrExit(
   label: string,
