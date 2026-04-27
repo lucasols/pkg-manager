@@ -76,27 +76,27 @@ function runCmdWithNpmAuthPromptResponse(
   const scriptArgs = getScriptArgs(command, args);
 
   if (!scriptArgs) {
-    return runCmdAndOpenAuthUrl(command, args, options, 'pipe');
+    return runCmdAndOpenAuthUrl(command, args, options);
   }
 
-  return runCmdAndOpenAuthUrl('script', scriptArgs, options, 'interactive');
+  return runCmdAndOpenAuthUrl('script', scriptArgs, options);
 }
 
 function runCmdAndOpenAuthUrl(
   command: string,
   args: string[],
   options: RunCmdOptions,
-  mode: 'interactive' | 'pipe',
 ): Promise<{ ok: true; output: string } | { ok: false; error: string }> {
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       cwd: options.cwd,
-      stdio: mode === 'interactive' ? ['inherit', 'pipe', 'pipe'] : 'pipe',
+      stdio: 'pipe',
     });
 
     let output = '';
     let error = '';
     let promptBuffer = '';
+    let answeredBrowserPrompt = false;
     let openedAuthUrl = false;
 
     function handleOutput(
@@ -110,8 +110,13 @@ function runCmdAndOpenAuthUrl(
 
       promptBuffer = `${promptBuffer}${text}`.slice(-2000);
 
-      if (!openedAuthUrl && shouldOpenNpmAuthUrl(promptBuffer)) {
-        const authUrl = promptBuffer.match(URL_REGEX)?.[0];
+      if (!answeredBrowserPrompt && NPM_BROWSER_AUTH_PROMPT_REGEX.test(promptBuffer)) {
+        answeredBrowserPrompt = true;
+        proc.stdin.write('\n');
+      }
+
+      if (!openedAuthUrl) {
+        const authUrl = getNpmAuthUrl(promptBuffer);
 
         if (authUrl) {
           openedAuthUrl = true;
@@ -121,31 +126,27 @@ function runCmdAndOpenAuthUrl(
     }
 
     function forwardInput(data: Buffer) {
-      if (proc.stdin?.writable) {
+      if (proc.stdin.writable) {
         proc.stdin.write(data);
       }
     }
 
-    if (mode === 'pipe') {
-      process.stdin.on('data', forwardInput);
-    }
+    process.stdin.on('data', forwardInput);
 
-    proc.stdout?.on('data', (data: Buffer) => {
+    proc.stdout.on('data', (data: Buffer) => {
       handleOutput(data, process.stdout, (text) => {
         output += text;
       });
     });
 
-    proc.stderr?.on('data', (data: Buffer) => {
+    proc.stderr.on('data', (data: Buffer) => {
       handleOutput(data, process.stderr, (text) => {
         error += text;
       });
     });
 
     proc.on('close', (code) => {
-      if (mode === 'pipe') {
-        process.stdin.off('data', forwardInput);
-      }
+      process.stdin.off('data', forwardInput);
 
       if (code === 0) {
         resolve({ ok: true, output });
@@ -158,19 +159,18 @@ function runCmdAndOpenAuthUrl(
     });
 
     proc.on('error', (spawnError) => {
-      if (mode === 'pipe') {
-        process.stdin.off('data', forwardInput);
-      }
+      process.stdin.off('data', forwardInput);
       resolve({ ok: false, error: spawnError.message });
     });
   });
 }
 
-function shouldOpenNpmAuthUrl(output: string): boolean {
-  return URL_REGEX.test(output) && (
-    NPM_BROWSER_AUTH_PROMPT_REGEX.test(output)
-    || NPM_AUTH_URL_TITLE_REGEX.test(output)
-  );
+function getNpmAuthUrl(output: string): string | undefined {
+  const titleMatch = output.match(NPM_AUTH_URL_TITLE_REGEX);
+
+  if (titleMatch?.index === undefined) return undefined;
+
+  return output.slice(titleMatch.index).match(URL_REGEX)?.[0];
 }
 
 function openUrl(url: string): void {
