@@ -14,7 +14,7 @@ import {
 import { commitIfDirty, isGitClean } from '../core/git.ts';
 import {
   checkHashForDuplicate,
-  generateDirectoryHash,
+  generatePackageHash,
   savePackageHash,
 } from '../core/hash.ts';
 import { buildDependencies } from '../core/monorepo.ts';
@@ -127,16 +127,8 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     }
   }
 
-  const distPath = join(packagePath, 'dist');
-
-  if (!existsSync(distPath)) {
-    console.error(styleText(['red', 'bold'], `dist directory not found at ${distPath}`));
-    console.error('Please build your package first.');
-    process.exit(1);
-  }
-
-  console.log(styleText(['dim'], '\nGenerating build hash...'));
-  const currentHash = generateDirectoryHash(distPath);
+  console.log(styleText(['dim'], '\nGenerating package hash...'));
+  const currentHash = generatePackageHash(packagePath);
   console.log(styleText(['dim'], `Hash: ${currentHash.slice(0, 12)}...`));
 
   const hashStorePath = join(cwd, getHashStorePath(config));
@@ -149,7 +141,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
         `\nThis build has already been published as ${packageName}@${hashCheck.existingVersion}`,
       ),
     );
-    console.error('No changes detected in the build output.');
+    console.error('No changes detected in the package files.');
     console.error('Make code changes before attempting to publish.');
     console.error('Or use --force to publish anyway.');
     process.exit(1);

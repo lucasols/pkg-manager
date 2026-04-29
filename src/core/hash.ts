@@ -1,3 +1,4 @@
+import { spawnSync } from 'child_process';
 import { createHash } from 'crypto';
 import {
   existsSync,
@@ -18,6 +19,28 @@ const packageHashesSchema = z.object({
 const hashStoreSchema = z.object({
   packages: z.record(z.string(), packageHashesSchema),
 });
+
+const npmPackResultSchema = z.array(
+  z.object({
+    files: z.array(
+      z.object({
+        path: z.string(),
+      }),
+    ),
+  }),
+);
+
+const packageJsonHashSchema = z.record(z.string(), z.unknown());
+
+export function generatePackageHash(packagePath: string): string {
+  const files = getPackedFiles(packagePath);
+
+  if (files.length === 0) {
+    throw new Error('Package would not publish any files');
+  }
+
+  return generateFileHash(packagePath, files);
+}
 
 export function generateDirectoryHash(dirPath: string): string {
   if (!existsSync(dirPath)) {
@@ -51,6 +74,52 @@ export function generateDirectoryHash(dirPath: string): string {
   }
 
   return hash.digest('hex');
+}
+
+function getPackedFiles(packagePath: string): string[] {
+  const result = spawnSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: packagePath,
+    encoding: 'utf-8',
+  });
+
+  if (result.status !== 0) {
+    throw new Error(result.stderr || result.stdout || 'Failed to list package files');
+  }
+
+  const parsed = JSON.parse(result.stdout);
+  const packResults = npmPackResultSchema.parse(parsed);
+  const [packResult] = packResults;
+
+  if (!packResult) return [];
+
+  return packResult.files.map((file) => file.path).sort();
+}
+
+function generateFileHash(basePath: string, files: string[]): string {
+  const hash = createHash('sha256');
+
+  for (const filePath of files) {
+    const content = readFileForHash(basePath, filePath);
+    hash.update(filePath);
+    hash.update(content);
+  }
+
+  return hash.digest('hex');
+}
+
+function readFileForHash(basePath: string, filePath: string): Buffer {
+  const content = readFileSync(join(basePath, filePath));
+
+  if (filePath !== 'package.json') return content;
+
+  return Buffer.from(normalizePackageJsonForHash(content.toString('utf-8')));
+}
+
+function normalizePackageJsonForHash(content: string): string {
+  const packageJson = packageJsonHashSchema.parse(JSON.parse(content));
+  delete packageJson.version;
+
+  return `${JSON.stringify(packageJson)}\n`;
 }
 
 type HashStore = z.infer<typeof hashStoreSchema>;
