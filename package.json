@@ -1,7 +1,7 @@
 {
   "name": "@ls-stack/pkg-manager",
   "description": "CLI tool for managing package publishing with hash-based change tracking and monorepo support",
-  "version": "0.7.4",
+  "version": "0.7.5",
   "license": "MIT",
   "scripts": {
     "dev": "node src/main.ts",
