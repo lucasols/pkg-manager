@@ -184,15 +184,6 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     console.warn('Force flag enabled - proceeding with publish anyway.')
   }
 
-  const registry = getPublishRegistry(packagePath)
-
-  if (args.dryRun) {
-    const registryText = registry ? ` against ${registry}` : ''
-    console.log(styleText(['dim'], `\nWould verify npm login${registryText}.`))
-  } else {
-    await ensureNpmLoggedIn(packagePath, registry)
-  }
-
   const preBumpHead = !args.dryRun ? await getCurrentHead() : undefined
   const existingTags = !args.dryRun ? await getGitTags() : new Set<string>()
   const createdTags: string[] = []
@@ -281,25 +272,9 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
       publishArgs.push('--tag', versionBump.distTag)
     }
 
-    let publishResult = await runCmd('publish', publishArgs, {
+    const publishResult = await runCmd('publish', publishArgs, {
       cwd: packagePath,
     })
-
-    if (
-      !publishResult.ok &&
-      publishResult.error.includes('npm ERR! code ENEEDAUTH')
-    ) {
-      console.warn(
-        styleText(
-          ['yellow'],
-          'Publish failed. Retrying with npm auth prompt handling...',
-        ),
-      )
-      publishResult = await runCmd('publish', publishArgs, {
-        cwd: packagePath,
-        autoRespondToNpmAuthPrompt: true,
-      })
-    }
 
     if (!publishResult.ok) {
       console.error(styleText(['red', 'bold'], 'Failed: publish'))
@@ -765,86 +740,6 @@ function getPackageName(packagePath: string): string {
 function getPackageVersion(packagePath: string): string {
   const packageJson = readPackageJson(packagePath)
   return packageJson.version ?? '0.0.0'
-}
-
-function getPublishRegistry(packagePath: string): string | undefined {
-  const packageJson = readPackageJson(packagePath)
-  return packageJson.publishConfig?.registry
-}
-
-async function ensureNpmLoggedIn(
-  packagePath: string,
-  registry: string | undefined,
-): Promise<void> {
-  const registryText = registry ? ` (${registry})` : ''
-
-  console.log(styleText(['dim'], `\nChecking npm login${registryText}...`))
-
-  const whoami = await checkNpmLogin(packagePath, registry)
-
-  if (whoami.ok) {
-    console.log(styleText(['dim'], `Logged in to npm as ${whoami.username}.`))
-    return
-  }
-
-  console.warn(styleText(['yellow'], 'You are not logged in to npm.'))
-
-  const shouldLogin = await cliInput.confirm('Run npm login now?', {
-    initial: true,
-  })
-
-  if (!shouldLogin) {
-    console.error(
-      styleText(['red', 'bold'], 'Cannot publish without npm login.'),
-    )
-    process.exit(1)
-  }
-
-  const loginResult = await runCmd(
-    'npm login',
-    withRegistry(['pnpm', 'npm', 'login'], registry),
-    { cwd: packagePath, autoRespondToNpmAuthPrompt: true },
-  )
-
-  if (!loginResult.ok) {
-    console.error(styleText(['red', 'bold'], 'Failed: npm login'))
-    console.error(loginResult.error)
-    process.exit(1)
-  }
-
-  const recheck = await checkNpmLogin(packagePath, registry)
-
-  if (!recheck.ok) {
-    console.error(
-      styleText(['red', 'bold'], 'npm login could not be verified.'),
-    )
-    console.error(recheck.error)
-    process.exit(1)
-  }
-
-  console.log(styleText(['dim'], `Logged in to npm as ${recheck.username}.`))
-}
-
-async function checkNpmLogin(
-  packagePath: string,
-  registry: string | undefined,
-): Promise<{ ok: true; username: string } | { ok: false; error: string }> {
-  const result = await runCmd(
-    'npm whoami',
-    withRegistry(['pnpm', 'npm', 'whoami'], registry),
-    { cwd: packagePath, silent: true },
-  )
-
-  if (!result.ok) {
-    return { ok: false, error: result.error }
-  }
-
-  return { ok: true, username: result.output.trim() }
-}
-
-function withRegistry(cmd: string[], registry: string | undefined): string[] {
-  if (!registry) return cmd
-  return [...cmd, '--registry', registry]
 }
 
 async function getCurrentHead(): Promise<string> {
