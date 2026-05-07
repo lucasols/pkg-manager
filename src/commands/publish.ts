@@ -248,10 +248,22 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
       publishArgs.push('--tag', versionBump.distTag);
     }
 
-    const publishResult = await runCmd('publish', publishArgs, {
+    let publishResult = await runCmd('publish', publishArgs, {
       cwd: packagePath,
-      autoRespondToNpmAuthPrompt: true,
     });
+
+    if (!publishResult.ok) {
+      console.warn(
+        styleText(
+          ['yellow'],
+          'Publish failed. Retrying with npm auth prompt handling...',
+        ),
+      );
+      publishResult = await runCmd('publish', publishArgs, {
+        cwd: packagePath,
+        autoRespondToNpmAuthPrompt: true,
+      });
+    }
 
     if (!publishResult.ok) {
       console.error(styleText(['red', 'bold'], 'Failed: publish'));
