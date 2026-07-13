@@ -90,6 +90,8 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     )
   }
 
+  const skipPublishGitChecks = await checkPublishBranch(packagePath)
+
   const versionBump = await resolveVersionBump(args.type, currentVersion)
 
   if (
@@ -267,6 +269,10 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   if (!args.dryRun) {
     const publishArgs = ['pnpm', 'publish', '--access', 'public']
+
+    if (skipPublishGitChecks) {
+      publishArgs.push('--no-git-checks')
+    }
 
     if (versionBump.distTag) {
       publishArgs.push('--tag', versionBump.distTag)
@@ -740,6 +746,63 @@ function getPackageName(packagePath: string): string {
 function getPackageVersion(packagePath: string): string {
   const packageJson = readPackageJson(packagePath)
   return packageJson.version ?? '0.0.0'
+}
+
+async function readPnpmConfigValue(
+  key: string,
+  cwd: string,
+): Promise<string | undefined> {
+  const result = await runCmd(
+    `read pnpm config ${key}`,
+    ['pnpm', 'config', 'get', key],
+    { silent: true, cwd },
+  )
+
+  if (!result.ok) return undefined
+
+  const value = result.output.trim()
+
+  return value === '' || value === 'undefined' ? undefined : value
+}
+
+/**
+ * Replicates pnpm's `publish-branch` git check before any version changes are
+ * made, so a wrong-branch publish fails fast instead of after the version
+ * bump. Returns true if `--no-git-checks` should be passed to `pnpm publish`.
+ */
+async function checkPublishBranch(packagePath: string): Promise<boolean> {
+  const gitChecks = await readPnpmConfigValue('git-checks', packagePath)
+
+  if (gitChecks === 'false') return false
+
+  const publishBranch =
+    (await readPnpmConfigValue('publish-branch', packagePath)) ?? 'master|main'
+
+  const allowedBranches = publishBranch.split('|').map((branch) =>
+    branch.trim(),
+  )
+
+  const branchResult = await runCmd(
+    'read current branch',
+    ['git', 'branch', '--show-current'],
+    { silent: true },
+  )
+
+  const currentBranch = branchResult.ok ? branchResult.output.trim() : ''
+
+  if (currentBranch && allowedBranches.includes(currentBranch)) return false
+
+  const confirmed = await cliInput.confirm(
+    `You're on branch "${currentBranch}" but your "publish-branch" is set to "${publishBranch}". Do you want to continue?`,
+    { initial: false },
+  )
+
+  if (!confirmed) {
+    console.log('Aborted.')
+    process.exit(1)
+  }
+
+  return true
 }
 
 async function getCurrentHead(): Promise<string> {
