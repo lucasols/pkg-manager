@@ -31,18 +31,33 @@ const npmPackResultSchema = z.array(
 );
 
 const packageJsonHashSchema = z.record(z.string(), z.unknown());
+const dependenciesHashSchema = z.record(z.string(), z.unknown());
 
-export function generatePackageHash(packagePath: string): string {
+type PackageHashOptions = {
+  normalizedOptionalDependencies: string[];
+};
+
+export function generatePackageHash(
+  packagePath: string,
+  options: PackageHashOptions = { normalizedOptionalDependencies: [] },
+): string {
   const files = getPackedFiles(packagePath);
 
   if (files.length === 0) {
     throw new Error('Package would not publish any files');
   }
 
-  return generateFileHash(packagePath, files);
+  return generateFileHash(packagePath, files, options);
 }
 
-export function generateDirectoryHash(dirPath: string): string {
+type DirectoryHashOptions = {
+  normalizePackageJsonVersions: boolean;
+};
+
+export function generateDirectoryHash(
+  dirPath: string,
+  options: DirectoryHashOptions = { normalizePackageJsonVersions: false },
+): string {
   if (!existsSync(dirPath)) {
     throw new Error(`Directory does not exist: ${dirPath}`);
   }
@@ -69,8 +84,12 @@ export function generateDirectoryHash(dirPath: string): string {
   for (const filePath of files) {
     const fullPath = join(dirPath, filePath);
     const content = readFileSync(fullPath);
+    const hashContent =
+      options.normalizePackageJsonVersions && filePath.endsWith('package.json')
+        ? Buffer.from(normalizePackageJsonForHash(content.toString('utf-8')))
+        : content;
     hash.update(filePath);
-    hash.update(content);
+    hash.update(hashContent);
   }
 
   return hash.digest('hex');
@@ -95,11 +114,15 @@ function getPackedFiles(packagePath: string): string[] {
   return packResult.files.map((file) => file.path).sort();
 }
 
-function generateFileHash(basePath: string, files: string[]): string {
+function generateFileHash(
+  basePath: string,
+  files: string[],
+  options: PackageHashOptions,
+): string {
   const hash = createHash('sha256');
 
   for (const filePath of files) {
-    const content = readFileForHash(basePath, filePath);
+    const content = readFileForHash(basePath, filePath, options);
     hash.update(filePath);
     hash.update(content);
   }
@@ -107,17 +130,43 @@ function generateFileHash(basePath: string, files: string[]): string {
   return hash.digest('hex');
 }
 
-function readFileForHash(basePath: string, filePath: string): Buffer {
+function readFileForHash(
+  basePath: string,
+  filePath: string,
+  options: PackageHashOptions,
+): Buffer {
   const content = readFileSync(join(basePath, filePath));
 
   if (filePath !== 'package.json') return content;
 
-  return Buffer.from(normalizePackageJsonForHash(content.toString('utf-8')));
+  return Buffer.from(
+    normalizePackageJsonForHash(
+      content.toString('utf-8'),
+      options.normalizedOptionalDependencies,
+    ),
+  );
 }
 
-function normalizePackageJsonForHash(content: string): string {
+function normalizePackageJsonForHash(
+  content: string,
+  normalizedOptionalDependencies: string[] = [],
+): string {
   const packageJson = packageJsonHashSchema.parse(JSON.parse(content));
   delete packageJson.version;
+
+  const optionalDependenciesResult = dependenciesHashSchema.safeParse(
+    packageJson.optionalDependencies,
+  );
+
+  if (optionalDependenciesResult.success) {
+    for (const packageName of normalizedOptionalDependencies) {
+      if (packageName in optionalDependenciesResult.data) {
+        optionalDependenciesResult.data[packageName] = '<platform-version>';
+      }
+    }
+
+    packageJson.optionalDependencies = optionalDependenciesResult.data;
+  }
 
   return `${JSON.stringify(packageJson)}\n`;
 }

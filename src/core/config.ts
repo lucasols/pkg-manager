@@ -11,10 +11,18 @@ const prePublishScriptSchema = z.object({
   label: z.string(),
 })
 
+const packageReleaseSchema = z.discriminatedUnion('type', [
+  z.object({
+    type: z.literal('napi'),
+    npmDir: z.string().optional(),
+  }),
+])
+
 const monorepoPackageSchema = z.object({
   name: z.string(),
   path: z.string(),
   dependsOn: z.array(z.string()).optional(),
+  release: packageReleaseSchema.optional(),
 })
 
 const pkgManagerConfigSchema = z.object({
@@ -30,6 +38,13 @@ const pkgManagerConfigSchema = z.object({
   gitPush: z.boolean().optional(),
 })
 
+export type PackageRelease = {
+  /** Publish the root package and all @napi-rs platform packages as one unit */
+  type: 'napi'
+  /** Directory containing generated platform packages, relative to the package */
+  npmDir?: string
+}
+
 export type MonorepoPackage = {
   /** Package name (as in package.json) */
   name: string
@@ -37,6 +52,8 @@ export type MonorepoPackage = {
   path: string
   /** Package names this package depends on (for topological ordering) */
   dependsOn?: string[]
+  /** Specialized release lifecycle for this package */
+  release?: PackageRelease
 }
 
 export type PrePublishScript = {
@@ -171,14 +188,21 @@ export function generateConfigFile(
     lines.push('  monorepo: {')
     lines.push('    packages: [')
     for (const pkg of config.monorepo.packages) {
+      const fields = [`name: '${pkg.name}'`, `path: '${pkg.path}'`]
+
       if (pkg.dependsOn && pkg.dependsOn.length > 0) {
-        const depsStr = pkg.dependsOn.map((d) => `'${d}'`).join(', ')
-        lines.push(
-          `      { name: '${pkg.name}', path: '${pkg.path}', dependsOn: [${depsStr}] },`
-        )
-      } else {
-        lines.push(`      { name: '${pkg.name}', path: '${pkg.path}' },`)
+        const depsStr = pkg.dependsOn.map((dependency) => `'${dependency}'`)
+        fields.push(`dependsOn: [${depsStr.join(', ')}]`)
       }
+
+      if (pkg.release?.type === 'napi') {
+        const npmDir = pkg.release.npmDir
+          ? `, npmDir: '${pkg.release.npmDir}'`
+          : ''
+        fields.push(`release: { type: 'napi'${npmDir} }`)
+      }
+
+      lines.push(`      { ${fields.join(', ')} },`)
     }
     lines.push('    ],')
     lines.push('  },')

@@ -68,7 +68,7 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 3. Confirms major version bumps (configurable)
 4. Builds dependencies first (monorepo, topological order)
 5. Runs pre-publish scripts (required - see [Pre-Publish Scripts](#pre-publish-scripts))
-6. Generates SHA256 hash of `dist/` directory
+6. Generates a SHA256 hash of the files npm will publish
 7. Checks hash against stored hashes (prevents duplicate publishes)
 8. Verifies npm login and offers to run `pnpm npm login` if needed
 9. Bumps version with `pnpm version`
@@ -100,6 +100,11 @@ export default defineConfig({
         path: 'packages/utils',
         dependsOn: ['@scope/core'],
       },
+      {
+        name: '@scope/native',
+        path: 'packages/native',
+        release: { type: 'napi', npmDir: 'npm' },
+      },
     ],
   },
 })
@@ -120,6 +125,9 @@ export default defineConfig({
 | `monorepo.packages[].name`      | `string`   | Required                                | Package name (from package.json)        |
 | `monorepo.packages[].path`      | `string`   | Required                                | Path to package directory               |
 | `monorepo.packages[].dependsOn` | `string[]` | `[]`                                    | Package names this depends on           |
+| `monorepo.packages[].release`   | `object`   | -                                       | Specialized package release lifecycle   |
+| `release.type`                  | `'napi'`   | Required                                | Publish an N-API package as one unit     |
+| `release.npmDir`                | `string`   | `'npm'`                                 | Generated platform package directory    |
 | `hashStorePath`                 | `string`   | `node_modules/.pkg-manager/hashes.json` | Where to store publish hashes           |
 | `requireMajorConfirmation`      | `boolean`  | `true`                                  | Require confirmation for major versions |
 | `gitPush`                       | `boolean`  | `true`                                  | Push git commits and tag after publish  |
@@ -145,6 +153,57 @@ Pre-publish scripts are **required**. They ensure your package is built and vali
 ```
 
 This works without any config file.
+
+## N-API Packages
+
+An N-API package normally consists of a JavaScript loader plus one npm package
+per operating system and CPU target. Configure it once and pkg-manager presents
+the root package as a single publish choice:
+
+```typescript
+export default defineConfig({
+  monorepo: {
+    packages: [
+      {
+        name: '@scope/native',
+        path: 'native',
+        release: { type: 'napi', npmDir: 'npm' },
+      },
+    ],
+  },
+})
+```
+
+The package's pre-publish script must build or collect every configured target
+artifact into `npmDir`. With `@napi-rs/cli`, a typical script is:
+
+```json
+{
+  "scripts": {
+    "create-npm-dirs": "napi create-npm-dirs --npm-dir npm",
+    "collect-artifacts": "napi artifacts --output-dir artifacts --npm-dir npm",
+    "pre-publish": "pnpm test && pnpm create-npm-dirs && pnpm collect-artifacts"
+  }
+}
+```
+
+Map the generated platform package names to their local directories with pnpm
+`overrides`. This lets pkg-manager update the frozen lockfile before the new
+platform versions exist on npm:
+
+```yaml
+overrides:
+  '@scope/native-darwin-arm64': link:./native/npm/darwin-arm64
+  '@scope/native-linux-x64-gnu': link:./native/npm/linux-x64-gnu
+  # Add every configured target.
+```
+
+After the version bump, pkg-manager synchronizes every generated platform
+manifest, validates that all artifacts exist, and updates the root optional
+dependencies and workspace lockfile. It then commits and tags the synchronized
+release, publishes the platform packages, and finally publishes the root loader.
+Prereleases apply the same npm dist-tag to both the platform packages and the
+root package.
 
 ## Post-Publish Scripts
 
@@ -187,7 +246,11 @@ Prerelease versions are published with `--tag <preid>` (e.g., `--tag alpha`) so 
 
 ## Hash-Based Change Detection
 
-pkg-manager generates a SHA256 hash of the entire `dist/` directory (file paths + contents) before publishing. This hash is stored locally and checked on subsequent publishes to prevent publishing identical builds.
+pkg-manager generates a SHA256 hash of the files reported by `npm pack --dry-run`
+before publishing. N-API releases also include the generated platform package
+directory in the hash, so a native binary change is detected even when the root
+JavaScript loader is unchanged. The hash is stored locally and checked on
+subsequent publishes to prevent publishing identical builds.
 
 Hashes are stored in `node_modules/.pkg-manager/hashes.json` by default (not committed to git).
 

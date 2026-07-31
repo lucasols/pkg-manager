@@ -8,6 +8,7 @@ import { z } from 'zod'
 import {
   getHashStorePath,
   loadConfig,
+  type MonorepoPackage,
   type PkgManagerConfig,
   type PrePublishScript,
 } from '../core/config.ts'
@@ -18,6 +19,12 @@ import {
   savePackageHash,
 } from '../core/hash.ts'
 import { buildDependencies } from '../core/monorepo.ts'
+import {
+  describeNapiRelease,
+  generateNapiReleaseHash,
+  prepareNapiRelease,
+  publishNapiPlatformPackages,
+} from '../core/napiRelease.ts'
 import {
   bumpVersionPreview,
   getNextTags,
@@ -35,6 +42,29 @@ type VersionBumpSpec = {
   versionArgs: string[]
   isMajor: boolean
   distTag: string | undefined
+}
+
+function previewVersionBump(
+  currentVersion: string,
+  versionBump: VersionBumpSpec,
+): string {
+  const [versionType, preidArg] = versionBump.versionArgs
+  const preid = preidArg?.startsWith('--preid=')
+    ? preidArg.slice('--preid='.length)
+    : undefined
+
+  switch (versionType) {
+    case 'patch':
+    case 'minor':
+    case 'major':
+    case 'prepatch':
+    case 'preminor':
+    case 'premajor':
+    case 'prerelease':
+      return bumpVersionPreview(currentVersion, versionType, preid)
+    default:
+      return currentVersion
+  }
 }
 
 const packageJsonSchema = z.object({
@@ -63,7 +93,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   const isClean = await isGitClean()
 
-  if (!isClean) {
+  if (!isClean && !args.dryRun) {
     console.error(
       styleText(['red', 'bold'], 'Git working directory is not clean.'),
     )
@@ -71,9 +101,19 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     process.exit(1)
   }
 
+  if (!isClean) {
+    console.warn(
+      styleText(
+        ['yellow'],
+        'Git working directory is not clean; dry-run will inspect the current files.',
+      ),
+    )
+  }
+
   const targetPackage = await resolveTargetPackage(args.package, config)
   const packagePath = getPackagePath(targetPackage, config, cwd)
   const packageName = getPackageName(packagePath)
+  const packageConfig = getMonorepoPackage(packageName, config)
 
   const currentVersion = getPackageVersion(packagePath)
 
@@ -125,6 +165,11 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   console.log(styleText(['dim'], '\nRunning pre-publish scripts...'))
 
+  const prePublishEnv =
+    packageConfig?.release?.type === 'napi'
+      ? { PKG_MANAGER_NAPI_RELEASE: '1' }
+      : undefined
+
   for (const script of prePublishScripts) {
     console.log(styleText(['blue'], `\n${script.label}...`))
 
@@ -142,18 +187,23 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
           ['pnpm', '--filter', packageName, ...cmdArgs],
           {
             cwd,
+            env: prePublishEnv,
           },
         )
       } else {
         await runCmdOrExit(script.label, [cmd, ...cmdArgs], {
           cwd: packagePath,
+          env: prePublishEnv,
         })
       }
     }
   }
 
   console.log(styleText(['dim'], '\nGenerating package hash...'))
-  const currentHash = generatePackageHash(packagePath)
+  const currentHash =
+    packageConfig?.release?.type === 'napi'
+      ? generateNapiReleaseHash(packagePath, packageConfig.release)
+      : generatePackageHash(packagePath)
   console.log(styleText(['dim'], `Hash: ${currentHash.slice(0, 12)}...`))
 
   const hashStorePath = join(cwd, getHashStorePath(config))
@@ -218,6 +268,30 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
       process.exit(1)
     }
 
+    if (packageConfig?.release?.type === 'napi') {
+      console.log(styleText(['blue'], '\nPreparing N-API release metadata...'))
+      const prepareResult = await prepareNapiRelease(
+        packagePath,
+        packageConfig.release,
+      )
+
+      if (!prepareResult.ok) {
+        console.error(
+          styleText(['red', 'bold'], 'Failed: prepare N-API release'),
+        )
+        console.error(prepareResult.error)
+        await rollbackVersionChanges(
+          'N-API release preparation failed after the version bump.',
+          requireRollbackHead(preBumpHead),
+          packageName,
+          getPackageVersion(packagePath),
+          createdTags,
+          existingTags,
+        )
+        process.exit(1)
+      }
+    }
+
     const commitResult = await commitIfDirtyForPublish(
       `chore: bump ${packageName} version (${versionBump.label})`,
     )
@@ -237,12 +311,20 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     }
   }
 
-  const newVersion = getPackageVersion(packagePath)
+  const newVersion = args.dryRun
+    ? previewVersionBump(currentVersion, versionBump)
+    : getPackageVersion(packagePath)
   console.log(styleText(['green'], `New version: ${newVersion}`))
 
   console.log(styleText(['blue'], '\nCreating git tag...'))
 
   const tagName = `${packageName}@${newVersion}`
+
+  if (args.dryRun && packageConfig?.release?.type === 'napi') {
+    for (const description of describeNapiRelease(packageConfig.release)) {
+      console.log(styleText(['dim'], description))
+    }
+  }
 
   if (!args.dryRun) {
     const tagResult = await runCmd('create tag', ['git', 'tag', tagName])
@@ -268,6 +350,34 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   console.log(styleText(['blue'], '\nPublishing to npm...'))
 
   if (!args.dryRun) {
+    if (packageConfig?.release?.type === 'napi') {
+      console.log(styleText(['blue'], '\nPublishing N-API platform packages...'))
+      const platformPublishResult = await publishNapiPlatformPackages(
+        packagePath,
+        packageConfig.release,
+        versionBump.distTag,
+      )
+
+      if (!platformPublishResult.ok) {
+        console.error(
+          styleText(['red', 'bold'], 'Failed: publish N-API platform packages'),
+        )
+        console.error(platformPublishResult.error)
+        console.error(
+          'Some platform packages may already be published. Fix the failure and retry the same version before publishing the root package.',
+        )
+        await rollbackVersionChanges(
+          'N-API platform publication failed after the version bump.',
+          requireRollbackHead(preBumpHead),
+          packageName,
+          newVersion,
+          createdTags,
+          existingTags,
+        )
+        process.exit(1)
+      }
+    }
+
     const publishArgs = ['pnpm', 'publish', '--access', 'public']
 
     if (skipPublishGitChecks) {
@@ -333,12 +443,11 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     console.log(styleText(['dim'], '\nSkipping git push.'))
   }
 
-  console.log(
-    styleText(
-      ['green', 'bold'],
-      `\nSuccessfully published ${packageName}@${newVersion}`,
-    ),
-  )
+  const completionMessage = args.dryRun
+    ? `\nDry run complete for ${packageName}; nothing was published.`
+    : `\nSuccessfully published ${packageName}@${newVersion}`
+
+  console.log(styleText(['green', 'bold'], completionMessage))
 
   const postPublishScripts = config.postPublish ?? []
 
@@ -377,7 +486,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   const copyCmdPrefix = env.PKG_MANAGER_COPY_CMD
 
-  if (copyCmdPrefix) {
+  if (copyCmdPrefix && !args.dryRun) {
     const installCmd = `${copyCmdPrefix} ${packageName}@${newVersion}`
 
     await clipboardy.write(installCmd)
@@ -400,7 +509,10 @@ async function resolveTargetPackage(
     options: config.monorepo.packages.map((pkg) => ({
       value: pkg.name,
       label: pkg.name,
-      hint: pkg.path,
+      hint:
+        pkg.release?.type === 'napi'
+          ? `${pkg.path} · N-API platform bundle`
+          : pkg.path,
     })),
   })
 
@@ -710,6 +822,13 @@ function getPackagePath(
   if (pkg) return join(cwd, pkg.path)
 
   return cwd
+}
+
+function getMonorepoPackage(
+  packageName: string,
+  config: PkgManagerConfig,
+): MonorepoPackage | undefined {
+  return config.monorepo?.packages.find((pkg) => pkg.name === packageName)
 }
 
 function readPackageJson(

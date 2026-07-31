@@ -4,6 +4,7 @@ import { styleText } from 'node:util';
 export type RunCmdOptions = {
   cwd?: string;
   silent?: boolean;
+  env?: NodeJS.ProcessEnv;
 };
 
 export async function runCmd(
@@ -24,6 +25,7 @@ export async function runCmd(
   return new Promise((resolve) => {
     const proc = spawn(command, args, {
       cwd: options.cwd,
+      env: options.env ? { ...process.env, ...options.env } : undefined,
       stdio: options.silent ? 'pipe' : 'inherit',
     });
 
