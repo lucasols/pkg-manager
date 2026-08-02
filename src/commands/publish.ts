@@ -78,7 +78,7 @@ const packageJsonSchema = z.object({
   scripts: z.record(z.string(), z.string()).optional(),
 })
 
-type PublishArgs = {
+export type PublishArgs = {
   package: string | undefined
   type: string | undefined
   force: boolean
@@ -87,13 +87,28 @@ type PublishArgs = {
   noPush: boolean
 }
 
-export async function publishCommand(args: PublishArgs): Promise<void> {
+export type PublishResult = {
+  packageName: string
+  version: string
+  status: 'published' | 'skipped' | 'dry-run'
+}
+
+type PublishExecutionOptions = {
+  allowDirty?: boolean
+  skipUnchanged?: boolean
+  suppressCopyCommand?: boolean
+}
+
+export async function publishCommand(
+  args: PublishArgs,
+  execution: PublishExecutionOptions = {},
+): Promise<PublishResult> {
   const config = await loadConfig()
   const cwd = process.cwd()
 
   const isClean = await isGitClean()
 
-  if (!isClean && !args.dryRun) {
+  if (!isClean && !args.dryRun && !execution.allowDirty) {
     console.error(
       styleText(['red', 'bold'], 'Git working directory is not clean.'),
     )
@@ -101,7 +116,7 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
     process.exit(1)
   }
 
-  if (!isClean) {
+  if (!isClean && args.dryRun) {
     console.warn(
       styleText(
         ['yellow'],
@@ -214,6 +229,20 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
   )
 
   if (hashCheck.isDuplicate && !args.force) {
+    if (execution.skipUnchanged) {
+      console.log(
+        styleText(
+          ['yellow'],
+          `\nSkipping ${packageName}; no package changes detected since ${hashCheck.existingVersion}.`,
+        ),
+      )
+      return {
+        packageName,
+        version: hashCheck.existingVersion ?? currentVersion,
+        status: 'skipped',
+      }
+    }
+
     console.error(
       styleText(
         ['red', 'bold'],
@@ -486,12 +515,18 @@ export async function publishCommand(args: PublishArgs): Promise<void> {
 
   const copyCmdPrefix = env.PKG_MANAGER_COPY_CMD
 
-  if (copyCmdPrefix && !args.dryRun) {
+  if (copyCmdPrefix && !args.dryRun && !execution.suppressCopyCommand) {
     const installCmd = `${copyCmdPrefix} ${packageName}@${newVersion}`
 
     await clipboardy.write(installCmd)
 
     console.log(styleText(['dim'], `Copied to clipboard: ${installCmd}`))
+  }
+
+  return {
+    packageName,
+    version: newVersion,
+    status: args.dryRun ? 'dry-run' : 'published',
   }
 }
 

@@ -18,6 +18,9 @@ pkg-manager init
 
 # Publish a package
 pkg-manager publish
+
+# Publish all changed monorepo packages in dependency order
+pkg-manager publish-all
 ```
 
 ## Commands
@@ -77,6 +80,23 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 12. Saves hash for future duplicate detection
 13. Pushes git commits and tag
 14. Runs post-publish scripts (if configured)
+
+### `publish-all`
+
+Publishes every changed configured monorepo package in dependency order.
+
+```bash
+pkg-manager publish-all [--type <type>] [--force] [--dry-run] [--skip-confirm] [--no-push]
+```
+
+The default version bump is `patch`. Packages whose publish hash has not changed
+are skipped. When a dependency is released, configured dependents are released
+after it even if their own files were unchanged, ensuring their published
+workspace dependency metadata resolves to the new version. Explicit semver
+dependency ranges are advanced while `workspace:`, `catalog:`, `*`, and
+`latest` ranges are preserved.
+
+The short command is `pkg-manager pa`.
 
 ## Configuration
 

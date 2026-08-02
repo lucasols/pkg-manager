@@ -1,13 +1,14 @@
 #!/usr/bin/env node
 import { createCLI, createCmd } from '@ls-stack/cli';
 import { initCommand } from './commands/init.ts';
+import { publishAllCommand } from './commands/publishAll.ts';
 import { publishCommand } from './commands/publish.ts';
 
 await createCLI(
   {
     name: 'pkg-manager',
     baseCmd: 'pkg-manager',
-    sort: ['publish', 'init'],
+    sort: ['publish', 'publish-all', 'init'],
   },
   {
     init: createCmd({
@@ -70,6 +71,52 @@ await createCLI(
       run: async ({ package: pkg, type, force, dryRun, skipConfirm, noPush }) => {
         await publishCommand({
           package: pkg || undefined,
+          type,
+          force,
+          dryRun,
+          skipConfirm,
+          noPush,
+        });
+      },
+    }),
+
+    'publish-all': createCmd({
+      short: 'pa',
+      description: 'Publish every changed package in dependency order',
+      args: {
+        type: {
+          type: 'value-string-flag',
+          name: 'type',
+          description: 'Version bump type for changed packages (default: patch)',
+        },
+        force: {
+          type: 'flag',
+          name: 'force',
+          description: 'Publish every configured package, including unchanged packages',
+        },
+        dryRun: {
+          type: 'flag',
+          name: 'dry-run',
+          description: 'Show what would be done without making changes',
+        },
+        skipConfirm: {
+          type: 'flag',
+          name: 'skip-confirm',
+          description: 'Skip major version confirmation prompts',
+        },
+        noPush: {
+          type: 'flag',
+          name: 'no-push',
+          description: 'Skip pushing version commits and tags',
+        },
+      },
+      examples: [
+        { args: [], description: 'Publish changed packages with patch bumps' },
+        { args: ['--type', 'minor'], description: 'Publish changed packages with minor bumps' },
+        { args: ['--dry-run'], description: 'Preview changed package releases' },
+      ],
+      run: async ({ type, force, dryRun, skipConfirm, noPush }) => {
+        await publishAllCommand({
           type,
           force,
           dryRun,
