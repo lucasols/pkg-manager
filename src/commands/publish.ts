@@ -277,7 +277,7 @@ export async function publishCommand(
   if (!args.dryRun) {
     const bumpResult = await runCmd(
       'bump version',
-      ['pnpm', 'version', ...versionBump.versionArgs],
+      getVersionCommand(versionBump.versionArgs),
       {
         cwd: packagePath,
       },
@@ -528,6 +528,16 @@ export async function publishCommand(
     version: newVersion,
     status: args.dryRun ? 'dry-run' : 'published',
   }
+}
+
+export function getVersionCommand(versionArgs: string[]): string[] {
+  return [
+    'pnpm',
+    'version',
+    ...versionArgs,
+    '--no-git-checks',
+    '--no-git-tag-version',
+  ]
 }
 
 async function resolveTargetPackage(

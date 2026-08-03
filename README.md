@@ -75,7 +75,7 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 7. Checks hash against stored hashes (prevents duplicate publishes)
 8. Verifies npm login and offers to run `pnpm npm login` if needed
 9. Bumps version with `pnpm version`
-10. Creates git tag (`packageName@version`)
+10. Commits the version and generated release files, then creates git tag (`packageName@version`)
 11. Publishes with `pnpm publish --access public` (uses `--tag <preid>` for prereleases)
 12. Saves hash for future duplicate detection
 13. Pushes git commits and tag
