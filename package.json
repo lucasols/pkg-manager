@@ -20,6 +20,7 @@
   "repository": "github:lucasols/pkg-manager",
   "author": "Lucas Santos",
   "type": "module",
+  "packageManager": "pnpm@10.32.1",
   "bin": {
     "pkg-manager": "./dist/main.mjs"
   },
@@ -38,7 +39,7 @@
     "node": ">=25.0.0"
   },
   "dependencies": {
-    "@ls-stack/cli": "^0.6.0",
+    "@ls-stack/cli": "^0.6.1",
     "clipboardy": "^5.3.1",
     "zod": "^4.3.6"
   },
