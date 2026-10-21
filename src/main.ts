@@ -53,7 +53,7 @@ await createCLI(
         skipConfirm: {
           type: 'flag',
           name: 'skip-confirm',
-          description: 'Skip version bump confirmation prompts',
+          description: 'Skip confirmation prompts (major bumps, stable bumps from a prerelease, publish-branch mismatch)',
         },
         noPush: {
           type: 'flag',
@@ -102,7 +102,7 @@ await createCLI(
         skipConfirm: {
           type: 'flag',
           name: 'skip-confirm',
-          description: 'Skip version bump confirmation prompts',
+          description: 'Skip confirmation prompts (major bumps, stable bumps from a prerelease, publish-branch mismatch)',
         },
         noPush: {
           type: 'flag',

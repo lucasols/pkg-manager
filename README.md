@@ -61,7 +61,7 @@ pkg-manager publish [package] [--type <type>] [--force] [--dry-run] [--skip-conf
 - `--type <type>` - Version bump type: `patch`, `minor`, `major`, `prerelease`, `release`, `prepatch-alpha`, `preminor-beta`, `premajor-rc`, etc.
 - `--force` - Publish even if no changes detected
 - `--dry-run` - Preview what would happen without making changes
-- `--skip-confirm` - Skip version bump confirmation prompts (major bumps, and `patch`/`minor`/`major` from a prerelease)
+- `--skip-confirm` - Skip confirmation prompts: major bumps, `patch`/`minor`/`major` from a prerelease, and publishing from a branch outside pnpm's `publish-branch`
 - `--no-push` - Skip pushing the version commit and git tag
 
 **Workflow:**

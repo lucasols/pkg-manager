@@ -145,7 +145,10 @@ export async function publishCommand(
     )
   }
 
-  const skipPublishGitChecks = await checkPublishBranch(packagePath)
+  const skipPublishGitChecks = await checkPublishBranch(
+    packagePath,
+    args.skipConfirm,
+  )
 
   const versionBump = await resolveVersionBump(args.type, currentVersion)
 
@@ -949,7 +952,10 @@ async function readPnpmConfigValue(
  * made, so a wrong-branch publish fails fast instead of after the version
  * bump. Returns true if `--no-git-checks` should be passed to `pnpm publish`.
  */
-async function checkPublishBranch(packagePath: string): Promise<boolean> {
+async function checkPublishBranch(
+  packagePath: string,
+  skipConfirm: boolean,
+): Promise<boolean> {
   const gitChecks = await readPnpmConfigValue('git-checks', packagePath)
 
   if (gitChecks === 'false') return false
@@ -971,8 +977,17 @@ async function checkPublishBranch(packagePath: string): Promise<boolean> {
 
   if (currentBranch && allowedBranches.includes(currentBranch)) return false
 
+  const branchMismatchMessage = `You're on branch "${currentBranch}" but your "publish-branch" is set to "${publishBranch}".`
+
+  if (skipConfirm) {
+    console.warn(
+      styleText(['yellow'], `${branchMismatchMessage} Continuing (--skip-confirm).`),
+    )
+    return true
+  }
+
   const confirmed = await cliInput.confirm(
-    `You're on branch "${currentBranch}" but your "publish-branch" is set to "${publishBranch}". Do you want to continue?`,
+    `${branchMismatchMessage} Do you want to continue?`,
     { initial: false },
   )
 
