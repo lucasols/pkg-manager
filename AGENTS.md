@@ -30,6 +30,7 @@ This is a CLI tool for publishing npm packages with hash-based duplicate detecti
 - **Hash-based publishing**: Prevents duplicate publishes by comparing `dist/` hash, not version numbers
 - **Git integration**: Validates clean working directory, auto-commits hash files, creates version tags
 - **Topological builds**: In monorepos, builds/publishes packages in dependency order using pnpm filters
+- **Non-interactive support**: Every command must work in non-interactive shells (CI, scripts, agents). Every interactive prompt (`cliInput.*`) needs a flag or arg that bypasses it (e.g. `--type`, the package positional, `--skip-confirm`). When a prompt is reached without a TTY, `@ls-stack/cli` prints an error and exits 1, so a missing bypass fails the run instead of hanging. Never add a prompt that can't be skipped by args. To verify, run with stdin from `/dev/null` and stdout piped (e.g. `node src/main.ts publish --dry-run --type patch </dev/null | cat`)
 
 ### Entry Points
 

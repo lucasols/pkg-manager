@@ -149,7 +149,22 @@ export async function publishCommand(
 
   const versionBump = await resolveVersionBump(args.type, currentVersion)
 
-  if (
+  const isStableBumpFromPrerelease =
+    args.type !== undefined &&
+    isPrerelease(currentVersion) &&
+    STABLE_TYPES.some((type) => type === versionBump.label)
+
+  if (isStableBumpFromPrerelease && !args.skipConfirm) {
+    const confirmed = await cliInput.confirm(
+      `${currentVersion} is a prerelease. A ${versionBump.label} bump will publish the stable version ${previewVersionBump(currentVersion, versionBump)}. Are you sure?`,
+      { initial: false },
+    )
+
+    if (!confirmed) {
+      console.log('Aborted.')
+      process.exit(0)
+    }
+  } else if (
     versionBump.isMajor &&
     config.requireMajorConfirmation &&
     !args.skipConfirm
