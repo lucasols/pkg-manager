@@ -14,6 +14,13 @@ pnpm eslint       # Lint only (CI=true, --max-warnings=0)
 
 No test framework is configured. Testing is manual via pre-publish scripts.
 
+## Git and Publishing Workflow
+
+These are pre-approved, do them without asking the user for confirmation:
+
+- Always deliver changes through a pull request: create a branch from `main`, commit, push and open the PR with `gh pr create`. Never commit directly to `main`
+- Publish packages only from `main`, after the PR with the changes is merged: switch to an up-to-date `main` and run `pnpm publish-self --type <patch|minor|major>` from the repo root (it builds and publishes with the local pkg-manager)
+
 ## Architecture
 
 This is a CLI tool for publishing npm packages with hash-based duplicate detection and monorepo support.
