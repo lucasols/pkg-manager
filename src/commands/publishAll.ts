@@ -5,7 +5,11 @@ import { updateDependencyVersions } from '../core/dependencyVersions.ts'
 import { isGitClean } from '../core/git.ts'
 import { topologicalSort } from '../core/monorepo.ts'
 import { runCmd } from '../utils/runCmd.ts'
-import { publishCommand, type PublishArgs } from './publish.ts'
+import {
+  logRegistryDelayNotice,
+  publishCommand,
+  type PublishArgs,
+} from './publish.ts'
 
 export type PublishAllArgs = Omit<PublishArgs, 'package'>
 
@@ -93,6 +97,7 @@ export async function publishAllCommand(args: PublishAllArgs): Promise<void> {
         allowDirty: dependencyFilesChanged,
         skipUnchanged: true,
         suppressCopyCommand: true,
+        suppressRegistryDelayNotice: true,
       },
     )
 
@@ -114,4 +119,8 @@ export async function publishAllCommand(args: PublishAllArgs): Promise<void> {
   console.log(
     skipped.length > 0 ? `Skipped unchanged: ${skipped.join(', ')}` : '',
   )
+
+  if (published.length > 0 && !args.dryRun) {
+    logRegistryDelayNotice()
+  }
 }

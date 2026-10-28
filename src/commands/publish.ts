@@ -97,6 +97,16 @@ type PublishExecutionOptions = {
   allowDirty?: boolean
   skipUnchanged?: boolean
   suppressCopyCommand?: boolean
+  suppressRegistryDelayNotice?: boolean
+}
+
+export function logRegistryDelayNotice(): void {
+  console.log(
+    styleText(
+      ['yellow'],
+      '\nNote: npm runs verifications (e.g. malware scans) on published packages, so there may be a delay before the new version is available on the registry.',
+    ),
+  )
 }
 
 export async function publishCommand(
@@ -539,6 +549,10 @@ export async function publishCommand(
     await clipboardy.write(installCmd)
 
     console.log(styleText(['dim'], `Copied to clipboard: ${installCmd}`))
+  }
+
+  if (!args.dryRun && !execution.suppressRegistryDelayNotice) {
+    logRegistryDelayNotice()
   }
 
   return {
